@@ -1,0 +1,14 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+anacreonlib = {editable = true, path = "./../anacreonlib"}
+rx = "*"
+matplotlib = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.8"

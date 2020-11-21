@@ -1,0 +1,5 @@
+creds.py
+*.iml
+.idea/
+__pycache__/
+*.pyc
