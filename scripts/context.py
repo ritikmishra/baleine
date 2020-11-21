@@ -10,7 +10,7 @@ from rx.subject import BehaviorSubject, Subject
 
 class AnacreonContext:
     def __init__(self, auth: AnacreonApiRequest):
-        self._logger = logging.getLogger(str(self.__class__))
+        self._logger = logging.getLogger(str(self.__class__.__name__))
         self.client = AnacreonAsyncClient()
         self.base_request = auth
         self.auth = auth.dict(by_alias=False)
@@ -18,6 +18,8 @@ class AnacreonContext:
         self._state: List[AnacreonObject] = []
         self.any_update_observable = Subject()
         self.watch_update_observable = Subject()
+
+        self.watch_update_observable.subscribe(lambda _: self._logger.info("Watch update triggered!"))
 
     @property
     def state(self):
@@ -53,6 +55,7 @@ class AnacreonContext:
         full_state = [obj for obj in self.state if not obj_was_refreshed(obj)]
         full_state.extend(partial_state)
         self.state = full_state
+        self._logger.debug("Integrated partial state")
         return self.state
 
     async def periodically_update_objects(self, *, period: int = 60):
