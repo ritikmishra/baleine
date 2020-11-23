@@ -5,15 +5,11 @@ from typing import List
 from anacreonlib.types.type_hints import Location
 
 
-def flat_list_to_tuples(exploration: List[List[float]]) -> List[Location]:
+def flat_list_to_tuples(lst: List[float]) -> List[Location]:
     """
     Convert a list of the form `[1, 2, 3, 4, ...]` into the list of tuples `[(1, 2), (3, 4)]`
     """
-    ret: List[Location] = []
-    for contour in exploration:
-        # pair up successive elements
-        ret.extend(zip(contour[::2], contour[1::2]))
-    return ret
+    return list(zip(lst[::2], lst[1::2]))
 
 
 def dist(pointA: Location, pointB: Location) -> float:
