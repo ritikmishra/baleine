@@ -5,11 +5,11 @@ from anacreonlib.types.request_datatypes import AnacreonApiRequest
 from rx.operators import first
 
 from scripts.context import AnacreonContext
-from scripts.tasks.simple_tasks import explore_unexplored_regions
+from scripts.tasks import simple_tasks
 from scripts.utils import TermColors
 
 try:
-    from .creds import ACCESS_TOKEN, GAME_ID, SOV_ID
+    from scripts.creds import ACCESS_TOKEN, GAME_ID, SOV_ID
 except ImportError:
     raise LookupError("Could not find creds.py in scripts package! Did you make one?")
 
@@ -26,21 +26,24 @@ async def main():
     logger = logging.getLogger("main")
     fleet_names = ("roomba","roomba2","roomba3","roomba4","roomba5","roomba6")
     futures = []
+    update_task = None
 
     context = AnacreonContext(AnacreonApiRequest(**auth))
 
     try:
-        futures.append(asyncio.create_task(context.periodically_update_objects()))
+        update_task = asyncio.create_task(context.periodically_update_objects())
+
         logger.info("Waiting to get objects")
         await context.watch_update_observable.pipe(first())
         logger.info("Got objects!")
 
-        futures.extend(asyncio.create_task(explore_unexplored_regions(context, fleet_name)) for fleet_name in fleet_names)
+        # futures.extend(asyncio.create_task(explore_unexplored_regions(context, fleet_name)) for fleet_name in fleet_names)
+        # await simple_tasks.explore_around_planet(context, center_world_id=99)
     finally:
         for future in futures:
             await future
+        update_task.cancel()
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    asyncio.ensure_future(main())
-    loop.run_forever()
+    loop.run_until_complete(asyncio.ensure_future(main()))
