@@ -1,12 +1,12 @@
 import functools
 import json
 import logging
-from typing import List, Callable, Dict
+from typing import List, Callable, Dict, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from anacreonlib.types.request_datatypes import SetFleetDestinationRequest, DeployFleetRequest
-from anacreonlib.types.response_datatypes import Fleet, ReigningSovereign, World
+from anacreonlib.types.response_datatypes import Fleet, ReigningSovereign, World, AnacreonObject
 from anacreonlib.types.type_hints import Location
 from rx.operators import first
 
@@ -88,14 +88,18 @@ async def graph_exploration_boundary(context: AnacreonContext):
         logger.info("Saved graph file! " + filename)
 
 
-async def dump_state_to_json(context: AnacreonContext, filename="objects.json"):
+async def dump_state_to_json(context: AnacreonContext, state_subset: Optional[List[AnacreonObject]]=None, filename="objects.json"):
     logger = logging.getLogger("dump context state")
-    just_raw_objects = [obj for obj in context.state if isinstance(obj, dict)]
+
+    if state_subset is None:
+        state_subset = context.state
+
+    just_raw_objects = [obj for obj in state_subset if isinstance(obj, dict)]
 
     logger.info("\n".join(map(repr, just_raw_objects)))
 
     all_raw_objects = []
-    for obj in context.state:
+    for obj in state_subset:
         if isinstance(obj, dict):
             all_raw_objects.append(obj)
         else:
