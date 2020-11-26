@@ -1,21 +1,16 @@
 import asyncio
-import collections
 import logging
-from asyncio import QueueEmpty
+from itertools import chain
 from typing import List, Set, Optional, Union
 
-from anacreonlib.types.request_datatypes import SetFleetDestinationRequest, AttackRequest, BattlePlan
-from anacreonlib.types.response_datatypes import World, Fleet, UpdateObject
+from anacreonlib.types.response_datatypes import World, Fleet
 from anacreonlib.types.type_hints import BattleObjective
-from rx.operators import first
-from itertools import chain
 
 from scripts.context import AnacreonContext
+from scripts.tasks.fleet_manipulation_utils import OrderedPlanetId, attack_fleet_walk
 from scripts.utils import TermColors
 
 NameOrId = Union[int, str]
-
-ForcePlanetIdPair = collections.namedtuple("ForcePlanetIdPair", ["force", "id"])
 
 
 async def conquer_planets(context: AnacreonContext, planets: Union[List[World], Set[NameOrId]], *,
@@ -32,9 +27,9 @@ async def conquer_planets(context: AnacreonContext, planets: Union[List[World], 
     logger = logging.getLogger("Conquer planets")
 
     # Using priority queues ensures that we attack weak planets first so we can give our all to strong planets
-    hammer_missile_queue = asyncio.PriorityQueue()
-    hammer_queue = asyncio.PriorityQueue()
-    nail_queue = asyncio.PriorityQueue()
+    hammer_missile_queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+    hammer_queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+    nail_queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
 
     # Step 0: ensure that we are working with are all planet objects
     planet_objects: List[World]
@@ -79,16 +74,22 @@ async def conquer_planets(context: AnacreonContext, planets: Union[List[World], 
             force = context.get_forces(world.resources)
             if force.ground_forces <= 30:
                 if force.space_forces <= 20:
-                    nail_queue.put_nowait(ForcePlanetIdPair(force.ground_forces, world.id))
-                    logger.info(fstr.format(world.name, force.ground_forces, force.space_forces, force.missile_forces, "NAIL", world.id))
+                    nail_queue.put_nowait(OrderedPlanetId(force.ground_forces, world.id))
+                    logger.info(
+                        fstr.format(world.name, force.ground_forces, force.space_forces, force.missile_forces, "NAIL",
+                                    world.id))
                 elif force.space_forces <= 5000:
-                    pair = ForcePlanetIdPair(force.space_forces, world.id)
+                    pair = OrderedPlanetId(force.space_forces, world.id)
                     if anti_missile_hammer_fleets is not None and force.space_forces - force.missile_forces <= 50:
                         hammer_missile_queue.put_nowait(pair)
-                        logger.info(fstr.format(world.name, force.ground_forces, force.space_forces, force.missile_forces, "ANTI MISSILE", world.id))
+                        logger.info(
+                            fstr.format(world.name, force.ground_forces, force.space_forces, force.missile_forces,
+                                        "ANTI MISSILE", world.id))
                     else:
                         hammer_queue.put_nowait(pair)
-                        logger.info(fstr.format(world.name, force.ground_forces, force.space_forces, force.missile_forces, "HAMMER", world.id))
+                        logger.info(
+                            fstr.format(world.name, force.ground_forces, force.space_forces, force.missile_forces,
+                                        "HAMMER", world.id))
 
     # Step 3: fire up coroutines
     def future_callback(fut: asyncio.Future):
@@ -107,7 +108,8 @@ async def conquer_planets(context: AnacreonContext, planets: Union[List[World], 
     if hammer_missile_fleet_ids is not None:
         missile_only_futures = []
         for hammer_fleet_id in hammer_missile_fleet_ids:
-            future = asyncio.create_task(manage_hammer_fleet(context, hammer_fleet_id, hammer_missile_queue, nail_queue))
+            future = asyncio.create_task(
+                manage_hammer_fleet(context, hammer_fleet_id, hammer_missile_queue, nail_queue))
             future.add_done_callback(future_callback)
             missile_only_futures.append(future)
         hammer_futures.extend(missile_only_futures)
@@ -132,111 +134,35 @@ async def conquer_planets(context: AnacreonContext, planets: Union[List[World], 
             future.cancel()
 
 
-async def manage_hammer_fleet(context: AnacreonContext, fleet_id: int, hammer_queue: asyncio.Queue, nail_queue: asyncio.Queue):
-    logger = logging.getLogger(f"Hammer Fleet Manager (fleet ID {fleet_id})")
+async def manage_hammer_fleet(context: AnacreonContext, fleet_id: int, hammer_queue: asyncio.Queue,
+                              nail_queue: asyncio.Queue):
+    logger_name = f"Hammer Fleet Manager (fleet ID {fleet_id})"
+    logger = logging.getLogger(logger_name)
 
-    sf: float
-    planet_id: int
+    fleet_walk_gen = attack_fleet_walk(context, fleet_id, objective=BattleObjective.SPACE_SUPREMACY,
+                                       input_queue=hammer_queue, output_queue=nail_queue,
+                                       logger_name=logger_name)
 
-    while True:
-        # Step 0: find the planet we're going to
-        try:
-            sf, planet_id = hammer_queue.get_nowait()
-        except QueueEmpty:
-            return
+    async for world_state_after_attacked in fleet_walk_gen:
+        planet_id = world_state_after_attacked.id
+        forces = context.get_forces(world_state_after_attacked.resources)
 
-        logger.info(f"Going to hammer planet ID {planet_id}")
-        planet_sovereign_id: int = next(world.sovereign_id for world in context.state if isinstance(world, World) and world.id == planet_id)
+        if forces.space_forces <= 3:
+            logger.info(f"Probably conquered {planet_id} :)")
+            await fleet_walk_gen.asend(forces.ground_forces)
+        else:
+            await fleet_walk_gen.asend(None)
+            logger.info(f"Whatever happened on planet id {planet_id} was a failure most likely :(")
 
-        # Step 1: send fleet to the planet
-        partial_state = await context.client.set_fleet_destination(SetFleetDestinationRequest(obj_id=fleet_id, dest=planet_id, **context.base_request.dict(by_alias=False)))
-        context.register_response(partial_state)
-        logger.info(f"Sent hammer to planet ID {planet_id}")
-
-        get_this_fleet = lambda state: next(fleet for fleet in state if isinstance(fleet, Fleet) and fleet.id == fleet_id)
-
-        # Step 2: wait for the fleet to get there
-        while True:
-            full_state = await context.watch_update_observable.pipe(first())
-            if get_this_fleet(full_state).anchor_obj_id == planet_id:
-                break
-            logger.info(f"Still waiting for hammer to get to planet ID {planet_id}")
-
-        # Step 3: attack! AAAAAAAAAAAaaAAaaaaa
-        plan = BattlePlan(battlefield_id=planet_id, enemy_sovereign_ids=[planet_sovereign_id], objective=BattleObjective.SPACE_SUPREMACY)
-
-        attack_req = AttackRequest(attacker_obj_id=planet_id, battle_plan=plan,
-                                **context.base_request.dict(by_alias=False))
-        partial_state = await context.client.attack(attack_req)
-        context.register_response(partial_state)
-        logger.info(f"Hammer arrived! We are attacking {planet_id}! RAAAAA")
-        if get_this_fleet(context.state).battle_plan is None:
-            logger.warning("we attacked but battleplan is none?")
-            logger.info("\n".join(str(x) for x in partial_state))
-        # Step 4: wait for battle to finish
-        while True:
-            full_state = await context.watch_update_observable.pipe(first())
-            if get_this_fleet(full_state).battle_plan is None:
-                hammer_queue.task_done()
-                forces = context.get_forces(next(
-                    world for world in context.state if isinstance(world, World) and world.id == planet_id).resources)
-                if forces.space_forces <= 3:
-                    logger.info(f"Probably conquered {planet_id} :)")
-                    nail_queue.put_nowait((forces.ground_forces, planet_id))
-                else:
-                    logger.info(f"Whatever happened on planet id {planet_id} was a failure most likely :(")
-                break
-            logger.info(f"Invasion on {planet_id} is in progress")
 
 async def manage_nail_fleet(context: AnacreonContext, fleet_id: int, nail_queue: asyncio.Queue):
-    logger = logging.getLogger(f"Nail Fleet Manager (fleet ID {fleet_id})")
-    gf: float
-    planet_id: int
+    logger_name = f"Nail Fleet Manager (fleet ID {fleet_id})"
+    logger = logging.getLogger(logger_name)
 
-    while True:
-        # Step 0: find the planet we're going to
-        try:
-            logger.info("Waiting for nail to get planet in queue")
-            gf, planet_id = await nail_queue.get()
-        except QueueEmpty:
-            return
+    fleet_walk_gen = attack_fleet_walk(context, fleet_id, objective=BattleObjective.INVASION, input_queue=nail_queue,
+                                       input_queue_is_live=True, logger_name=logger_name)
 
-        logger.info(f"Going to nail planet ID {planet_id}")
-        planet_sovereign_id: int = next(world.sovereign_id for world in context.state if isinstance(world, World) and world.id == planet_id)
-
-        # Step 1: send fleet to the planet
-        partial_state = await context.client.set_fleet_destination(SetFleetDestinationRequest(obj_id=fleet_id, dest=planet_id, **context.base_request.dict(by_alias=False)))
-        context.register_response(partial_state)
-        logger.info(f"Sent nail to planet ID {planet_id}")
-
-        get_this_fleet = lambda state: next(fleet for fleet in state if isinstance(fleet, Fleet) and fleet.id == fleet_id)
-
-        # Step 2: wait for the fleet to get there
-        while True:
-            full_state = await context.watch_update_observable.pipe(first())
-            if get_this_fleet(full_state).anchor_obj_id == planet_id:
-                break
-            logger.info(f"Still waiting for nail to get to planet ID {planet_id}")
-
-
-        # Step 3: attack! AAAAAAAAAAAaaAAaaaaa
-        plan = BattlePlan(battlefield_id=planet_id, enemy_sovereign_ids=[planet_sovereign_id], objective=BattleObjective.INVASION)
-
-        attack_req = AttackRequest(attacker_obj_id=planet_id, battle_plan=plan, **context.base_request.dict(by_alias=False))
-        partial_state = await context.client.attack(attack_req)
-        context.register_response(partial_state)
-        logger.info(f"Nail arrived! We are attacking {planet_id}! RAAAAA")
-        if get_this_fleet(context.state).battle_plan is None:
-            logger.warning("we attacked but battleplan is none?")
-            logger.info("\n".join(str(x) for x in partial_state))
-
-        # Step 4: wait for battle to finish
-        while True:
-            full_state = await context.watch_update_observable.pipe(first())
-            if get_this_fleet(full_state).battle_plan is None:
-                nail_queue.task_done()
-                logger.info(f"Probably conquered {planet_id} :)")
-                break
-            logger.info(f"Invasion on {planet_id} is in progress")
-
-
+    async for world_state_after_attacked in fleet_walk_gen:
+        await fleet_walk_gen.asend(None)
+        if world_state_after_attacked.sovereign_id == context.base_request.sovereign_id:
+            logger.info(f"Conquered the planet ID {world_state_after_attacked.id}")

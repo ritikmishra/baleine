@@ -1,13 +1,12 @@
 import asyncio
 import logging
-from typing import List, Tuple
 
 from anacreonlib.types.request_datatypes import AnacreonApiRequest
 from anacreonlib.types.response_datatypes import World
 from rx.operators import first
 
-from scripts.context import AnacreonContext, MilitaryForces
-from scripts.tasks import simple_tasks, conquest_tasks
+from scripts.context import AnacreonContext
+from scripts.tasks import conquest_tasks
 from scripts.utils import TermColors, dist
 
 try:
@@ -42,7 +41,7 @@ async def main():
         capital = next(world for world in full_state if isinstance(world, World) and world.sovereign_id == SOV_ID)
         possible_victims = [world for world in full_state if isinstance(world, World) and 0 < dist(world.pos, capital.pos) <= 200 and world.sovereign_id == 1]
 
-        await conquest_tasks.conquer_planets(context, possible_victims, generic_hammer_fleets={"hammer"}, nail_fleets={"nail"}, anti_missile_hammer_fleets={"missileOnly"})
+        await conquest_tasks.conquer_planets(context, possible_victims, generic_hammer_fleets={"hammer"}, nail_fleets={"nail"})
         # futures.extend(asyncio.create_task(explore_unexplored_regions(context, fleet_name)) for fleet_name in fleet_names)
         # await simple_tasks.explore_around_planet(context, center_world_id=99)
     finally:
@@ -52,4 +51,4 @@ async def main():
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(asyncio.ensure_future(main()))
+    loop.run_until_complete(main())
