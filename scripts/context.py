@@ -1,14 +1,16 @@
 import asyncio
 import collections
+import functools
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Callable
 
 from anacreonlib.anacreon_async_client import AnacreonAsyncClient
 from anacreonlib.types.request_datatypes import AnacreonApiRequest
-from anacreonlib.types.response_datatypes import AnacreonObject, AnacreonObjectWithId, UpdateObject
+from anacreonlib.types.response_datatypes import AnacreonObject, AnacreonObjectWithId, UpdateObject, World
+from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfo, ScenarioInfoElement
 from rx.subject import BehaviorSubject, Subject
 
-from scripts.utils import flat_list_to_tuples
+from scripts.utils import flat_list_to_tuples, world_has_trait, trait_under_construction, type_supercedes_type
 
 MilitaryForces = collections.namedtuple("MilitaryForces", ["space_forces", "ground_forces", "missile_forces", "maneuvering_unit_forces"])
 """
@@ -28,6 +30,8 @@ class AnacreonContext:
         self._state: List[AnacreonObject] = []
         self.any_update_observable = Subject()
         self.watch_update_observable = Subject()
+
+        self.game_info: ScenarioInfo
 
         self.sf_calc = dict()
         self.gf_calc = dict()
@@ -105,23 +109,20 @@ class AnacreonContext:
 
         :return: None
         """
-        game_info = await self.client.get_game_info(self.base_request.auth_token, self.base_request.game_id)
-        for item in game_info["scenarioInfo"]:
-            try:
-                attack_value = float(item["attackValue"])
+        self.game_info = await self.client.get_game_info(self.base_request.auth_token, self.base_request.game_id)
+        for item in self.game_info.scenario_info:
+            if item.attack_value is not None:
+                attack_value = float(item.attack_value)
 
-                if item["category"] == "fixedUnit" or item["category"] == "orbitalUnit" or item["category"] == "maneuveringUnit":
-                    self.sf_calc[int(item["id"])] = attack_value
-                    if item["category"] == "maneuveringUnit":
-                        self.maneuvering_unit_calc[int(item["id"])] = attack_value
-                    if item["id"] in self.missile_calc.keys():
-                        self.missile_calc[item["id"]] = attack_value
+                if item.category in (Category.FIXED_UNIT, Category.ORBITAL_UNIT, Category.MANEUVERING_UNIT):
+                    self.sf_calc[item.id] = attack_value
+                    if item.category == Category.MANEUVERING_UNIT:
+                        self.maneuvering_unit_calc[item.id] = attack_value
+                    if item.id in self.missile_calc.keys():
+                        self.missile_calc[item.id] = attack_value
 
-                elif item["category"] == "groundUnit":
-                    self.gf_calc[int(item["id"])] = attack_value
-            except KeyError:
-                # There are 3 or 4 items in the scenario info that do not have a category
-                continue
+                elif item.category == Category.GROUND_UNIT:
+                    self.gf_calc[item.id] = attack_value
 
     def get_forces(self, resources: List[float]) -> MilitaryForces:
         """
@@ -147,3 +148,55 @@ class AnacreonContext:
             elif item_id in self.gf_calc.keys():
                 gf += float(item_qty) * self.gf_calc[item_id]
         return MilitaryForces(sf/100, gf/100, maneuveringunit_force/100, missile_force/100)
+
+    def get_valid_improvement_list(self, world: World) -> List[ScenarioInfoElement]:
+        """Returns a list of improvements that can be built"""
+        valid_improvement_ids: List[ScenarioInfoElement] = []
+        trait_dict = world.squashed_trait_dict
+        this_world_has_trait: Callable[[int], bool] = functools.partial(world_has_trait, self.game_info.scenario_info, world)
+
+        for improvement in self.game_info.scenario_info:
+            if improvement.id is None or improvement.category is None:
+                continue
+
+            if improvement.category == Category.IMPROVEMENT \
+                    and not improvement.npe_only \
+                    and not improvement.designation_only \
+                    and improvement.build_time is not None \
+                    and improvement.id not in trait_dict.keys() \
+                    and (improvement.min_tech_level is None or world.tech_level >= improvement.min_tech_level):
+                if improvement.build_upgrade:
+                    # Check if we have the predecessor structure.
+                    has_predecessor_structure = any(this_world_has_trait(predecessor)
+                                                    and not trait_under_construction(trait_dict, predecessor)
+                                                    for predecessor in improvement.build_upgrade)
+                    if not has_predecessor_structure:
+                        continue
+                if improvement.build_requirements:
+                    # Check we have requirements. Requirements can be any trait.
+                    requirement_missing = any(not this_world_has_trait(requirement_id)
+                                              or trait_under_construction(trait_dict, requirement_id)
+                                              for requirement_id in improvement.build_requirements)
+                    if requirement_missing:
+                        continue
+
+                if improvement.build_exclusions:
+                    # Check if we are banned from doing so
+                    if any(this_world_has_trait(exclusion_id)
+                           for exclusion_id in improvement.build_exclusions):
+                        continue
+
+                # Check if this trait would be a downgrade from an existing trait
+                if any(type_supercedes_type(self.game_info.scenario_info, existing_trait_id, improvement.id)
+                       for existing_trait_id in trait_dict.keys()):
+                    continue
+
+                # if this is a tech advancement structure, check if we can build it
+                if improvement.role == "techAdvance":
+                    if (improvement.tech_level_advance or 0) <= world.tech_level:
+                        continue
+
+                # we have not continue'd so it is ok to  build
+                valid_improvement_ids.append(improvement)
+
+        return valid_improvement_ids

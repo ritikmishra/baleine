@@ -7,6 +7,7 @@ from rx.operators import first
 
 from scripts.context import AnacreonContext
 from scripts.tasks import conquest_tasks
+from scripts.tasks.improvement_related_tasks import build_habitats_spaceports
 from scripts.utils import TermColors, dist
 
 try:
@@ -30,7 +31,6 @@ async def main():
     update_task = None
 
     context = await AnacreonContext.create(AnacreonApiRequest(**auth))
-
     try:
         update_task = asyncio.create_task(context.periodically_update_objects())
 
@@ -38,10 +38,13 @@ async def main():
         full_state = await context.watch_update_observable.pipe(first())
         logger.info("Got objects!")
 
-        capital = next(world for world in full_state if isinstance(world, World) and world.sovereign_id == SOV_ID)
-        possible_victims = [world for world in full_state if isinstance(world, World) and 0 < dist(world.pos, capital.pos) <= 200 and world.sovereign_id == 1]
+        await build_habitats_spaceports(context)
 
-        await conquest_tasks.conquer_planets(context, possible_victims, generic_hammer_fleets={"hammer"}, nail_fleets={"nail"})
+        # capital = next(world for world in full_state if isinstance(world, World) and world.sovereign_id == SOV_ID)
+        # possible_victims = [world for world in full_state if isinstance(world, World) and 0 < dist(world.pos, capital.pos) <= 200 and world.sovereign_id == 1]
+        #
+        # await conquest_tasks.conquer_planets(context, possible_victims, generic_hammer_fleets={"hammer"}, nail_fleets={"nail"})
+
         # futures.extend(asyncio.create_task(explore_unexplored_regions(context, fleet_name)) for fleet_name in fleet_names)
         # await simple_tasks.explore_around_planet(context, center_world_id=99)
     finally:
