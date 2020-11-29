@@ -25,7 +25,6 @@ class AnacreonContext:
         self._logger = logging.getLogger(str(self.__class__.__name__))
         self.client = AnacreonAsyncClient()
         self.base_request = auth
-        self.auth = auth.dict(by_alias=False)
 
         self._state: List[AnacreonObject] = []
         self.any_update_observable = Subject()
@@ -39,6 +38,10 @@ class AnacreonContext:
         self.maneuvering_unit_calc = dict()
 
         self.watch_update_observable.subscribe(lambda _: self._logger.info("Watch update triggered!"))
+
+    @property
+    def auth(self):
+        return self.base_request.dict(by_alias=False)
 
     @staticmethod
     async def create(auth: AnacreonApiRequest):
@@ -114,7 +117,7 @@ class AnacreonContext:
             if item.attack_value is not None:
                 attack_value = float(item.attack_value)
 
-                if item.category in (Category.FIXED_UNIT, Category.ORBITAL_UNIT, Category.MANEUVERING_UNIT):
+                if item.category in (Category.FIXED_UNIT, Category.ORBITAL_UNIT, Category.MANEUVERING_UNIT) and item.cargo_space is None:
                     self.sf_calc[item.id] = attack_value
                     if item.category == Category.MANEUVERING_UNIT:
                         self.maneuvering_unit_calc[item.id] = attack_value

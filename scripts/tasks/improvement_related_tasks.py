@@ -29,7 +29,6 @@ async def build_habitats_spaceports(context: AnacreonContext):
                                                                          planet_name,
                                                                          trait.id,
                                                                          structure_name))
-                            logger.info(f"Added an order for {planet_name} to get a  {structure_name}")
                     except KeyError:
                         pass
 
