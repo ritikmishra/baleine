@@ -88,7 +88,7 @@ async def graph_exploration_boundary(context: AnacreonContext):
         logger.info("Saved graph file! " + filename)
 
 
-async def dump_state_to_json(context: AnacreonContext, state_subset: Optional[List[AnacreonObject]]=None, filename="objects.json"):
+def dump_state_to_json(context: AnacreonContext, state_subset: Optional[List[AnacreonObject]]=None, filename="objects.json"):
     logger = logging.getLogger("dump context state")
 
     if state_subset is None:
