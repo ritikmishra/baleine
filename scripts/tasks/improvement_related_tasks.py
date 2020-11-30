@@ -9,6 +9,11 @@ from scripts.context import AnacreonContext
 
 
 async def build_habitats_spaceports(context: AnacreonContext):
+    """
+    Builds habitat structures and spaceports on all planets on which they can be built
+    :param context: AnacreonContext
+    :return: None
+    """
     logger = logging.getLogger("build habitats and spaceports")
     ConstructionOrder = collections.namedtuple("ConstructionOrder",
                                                ["planet_id", "planet_name", "improvement_id", "improvement_name"])

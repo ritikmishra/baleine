@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import pprint
 
 from anacreonlib.types.request_datatypes import AnacreonApiRequest
 from anacreonlib.types.response_datatypes import World
@@ -7,7 +8,9 @@ from rx.operators import first
 
 from scripts.context import AnacreonContext
 from scripts.tasks import conquest_tasks
+from scripts.tasks.cluster_building import build_cluster, connect_worlds_to_fnd
 from scripts.tasks.improvement_related_tasks import build_habitats_spaceports
+from scripts.tasks.simple_tasks import dump_state_to_json
 from scripts.utils import TermColors, dist
 
 try:
@@ -39,6 +42,11 @@ async def main():
         logger.info("Got objects!")
 
         await build_habitats_spaceports(context)
+        dump_state_to_json(context)
+
+        # await build_cluster(context, 99)
+
+        # await connect_worlds_to_fnd(context, 4216)
 
         # capital = next(world for world in full_state if isinstance(world, World) and world.sovereign_id == SOV_ID)
         # possible_victims = [world for world in full_state if isinstance(world, World) and 0 < dist(world.pos, capital.pos) <= 200 and world.sovereign_id == 1]
@@ -46,7 +54,7 @@ async def main():
         # await conquest_tasks.conquer_planets(context, possible_victims, generic_hammer_fleets={"hammer"}, nail_fleets={"nail"})
 
         # futures.extend(asyncio.create_task(explore_unexplored_regions(context, fleet_name)) for fleet_name in fleet_names)
-        # await simple_tasks.explore_around_planet(context, center_world_id=99)
+        # await simple_tasks.scout_around_planet(context, center_world_id=99)
     finally:
         for future in futures:
             await future

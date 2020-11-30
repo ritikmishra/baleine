@@ -144,8 +144,18 @@ async def send_fleet_to_worlds_meeting_predicate(context: AnacreonContext, sourc
         context.register_response(partial_state)
 
 
-async def explore_around_planet(context: AnacreonContext, center_world_id: int, radius=200, *, resource_dict=None,
-                                source_obj_id=None):
+async def scout_around_planet(context: AnacreonContext, center_world_id: int, radius=200, *, resource_dict=None,
+                              source_obj_id=None):
+    """
+    Sends fleets to all planens within a radius of the center planet
+
+    :param context: AnacreonContext
+    :param center_world_id: The world that should be the center of our circle
+    :param radius: The radius of the circle
+    :param resource_dict: the fleet composition. defaults to 5 vanguards.
+    :param source_obj_id: the world from which the fleets should be deployed. defaults to the center world id.
+    :return: None
+    """
     logger = logging.getLogger(f"explore around planet {center_world_id}")
 
     if resource_dict is None:
