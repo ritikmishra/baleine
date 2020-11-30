@@ -1,5 +1,5 @@
 import math
-from typing import List, Dict, TypeVar, Union
+from typing import List, Dict, TypeVar, Union, Tuple
 
 from anacreonlib.types.response_datatypes import World, Trait
 from anacreonlib.types.scenario_info_datatypes import ScenarioInfoElement
@@ -15,6 +15,10 @@ def flat_list_to_tuples(lst: List[float]) -> List[Location]:
     """
     return list(zip(lst[::2], lst[1::2]))
 
+
+def flat_list_to_n_tuples(n: int, lst: List[T]) -> List[Tuple[T, ...]]:
+    zip_args = [lst[i::n] for i in range(n)]
+    return list(zip(*zip_args))
 
 def dict_to_flat_list(dict: Dict[T, U]) -> List[Union[T, U]]:
     """

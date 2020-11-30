@@ -1,15 +1,18 @@
 import asyncio
 import collections
+import dataclasses
 import functools
 import logging
-from typing import List, Tuple, Callable
+from typing import List, Tuple, Callable, Union, Dict, Optional
 
 from anacreonlib.anacreon_async_client import AnacreonAsyncClient
 from anacreonlib.types.request_datatypes import AnacreonApiRequest
-from anacreonlib.types.response_datatypes import AnacreonObject, AnacreonObjectWithId, UpdateObject, World
+from anacreonlib.types.response_datatypes import AnacreonObject, AnacreonObjectWithId, UpdateObject, World, Trait, \
+    OwnedWorld
 from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfo, ScenarioInfoElement
 from rx.subject import BehaviorSubject, Subject
 
+from scripts import utils
 from scripts.utils import flat_list_to_tuples, world_has_trait, trait_under_construction, type_supercedes_type
 
 MilitaryForces = collections.namedtuple("MilitaryForces", ["space_forces", "ground_forces", "missile_forces", "maneuvering_unit_forces"])
@@ -19,6 +22,21 @@ MilitaryForces = collections.namedtuple("MilitaryForces", ["space_forces", "grou
 :ivar missile_forces: A subset of space forces; only accounts for defenses that shoot missiles
 :ivar maneuvering_unit_forces: A subset of space forces; only accounts for maneuvering units (i.e ships)
 """
+
+
+@dataclasses.dataclass
+class ProductionInfo:
+    # resource_id: int = -1
+    available: float = 0
+    consumed: float = 0
+    exported: float = 0
+    imported: float = 0
+    produced: float = 0
+    consumed_optimal: float = 0
+    exported_optimal: float = 0
+    imported_optimal: float = 0
+    produced_optimal: float = 0
+
 
 class AnacreonContext:
     def __init__(self, auth: AnacreonApiRequest):
@@ -203,3 +221,116 @@ class AnacreonContext:
                 valid_improvement_ids.append(improvement)
 
         return valid_improvement_ids
+
+    def get_obj_by_id(self, id: int) -> Optional[AnacreonObjectWithId]:
+        try:
+            return next(obj for obj in self.state if isinstance(obj, AnacreonObjectWithId) and obj.id == id)
+        except StopIteration:
+            return None
+
+    def generate_production_info(self, world: Union[World, int]) -> Dict[int, ProductionInfo]:
+        """
+        Generate info that can be found in the production tab of a planet
+        :param world: The planet ID or the planet object
+        :param refresh: Whether or not to refresh the internal game objects cache
+        :return: A list of all the things that the planet has produced, imported, exported, etc
+        """
+
+        # This is more or less exactly how the game client calculates production as well
+        # I ported this from JavaScript
+        if isinstance(world, int):
+            maybe_world_obj = self.get_obj_by_id(world)
+            if maybe_world_obj is None or not isinstance(maybe_world_obj, World):
+                raise LookupError(f"Could not find world with id {world}")
+            worldobj: World = maybe_world_obj
+        else:
+            worldobj: World = world
+        assert isinstance(worldobj, World)
+
+        result = collections.defaultdict(ProductionInfo)
+
+        flat_list_to_4tuples = functools.partial(utils.flat_list_to_n_tuples, 4)
+        flat_list_to_3tuples = functools.partial(utils.flat_list_to_n_tuples, 3)
+
+        if isinstance(worldobj, OwnedWorld):
+            worldobj: OwnedWorld
+            # First we take into account the base consumption of the planet
+            for resource_id, optimal, actual in flat_list_to_3tuples(worldobj.base_consumption):
+                entry = result[resource_id]
+
+                entry.consumed_optimal += optimal
+
+                if actual is None:
+                    entry.consumed += optimal
+                else:
+                    entry.consumed += actual
+
+        for i, trait in enumerate(worldobj.traits):
+            # Next, we take into account what our structures are consuming
+            if isinstance(trait, Trait):
+                if trait.production_data:
+                    for resource_id, optimal, actual in flat_list_to_3tuples(trait.production_data):
+                        entry = result[resource_id]
+
+                        if optimal > 0.0:
+                            entry.produced_optimal += optimal
+                            if actual is None:
+                                entry.produced += optimal
+                            else:
+                                entry.produced += actual
+                        else:
+                            entry.consumed_optimal += -optimal
+                            if actual is None:
+                                entry.consumed += -optimal
+                            else:
+                                entry.consumed += -actual
+
+        if worldobj.trade_routes:
+            # Finally, we account for trade routes
+            for trade_route in worldobj.trade_routes:
+                exports = None
+                imports = None
+                if trade_route.reciprocal:
+                    # The data for this trade route belongs to another planet
+                    partner_obj: Optional[World] = self.get_obj_by_id(trade_route.partner_obj_id)
+                    if partner_obj is not None:
+                        for partner_trade_route in partner_obj.trade_routes:
+                            if partner_trade_route.partner_obj_id == worldobj.id:
+                                if partner_trade_route.exports:
+                                    imports = partner_trade_route.exports
+                                if partner_trade_route.imports:
+                                    exports = partner_trade_route.imports
+                else:
+                    if trade_route.exports:
+                        exports = trade_route.exports
+                    if trade_route.imports:
+                        imports = trade_route.imports
+
+                if exports is not None:
+                    for resource_id, _, optimal, actual in flat_list_to_4tuples(exports):
+                        entry = result[resource_id]
+
+                        if actual is None:
+                            entry.exported += optimal
+                        else:
+                            entry.exported += actual
+
+                        entry.exported_optimal += optimal
+
+                if imports is not None:
+                    for resource_id, _, optimal, actual in flat_list_to_4tuples(imports):
+                        entry = result[resource_id]
+
+                        if actual is None:
+                            entry.imported += optimal
+                        else:
+                            entry.imported += actual
+
+                        entry.imported_optimal += optimal
+
+                if worldobj.resources:
+                    for resource_id, resource_qty in flat_list_to_tuples(worldobj.resources):
+                        if resource_qty > 0:
+                            result[resource_id].available = resource_qty
+
+        return {int(k): v for k, v in result.items()}
