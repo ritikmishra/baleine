@@ -332,10 +332,18 @@ async def calculate_resource_deficit(context: AnacreonContext, *,
         for res_id, res_prod_info in world_prod_info.items():
             aggregate_prod_info[res_id] += res_prod_info
 
-    logger.info(f"{TermColors.BOLD}{'res_name':20}{'surplus':10}{TermColors.ENDC}")
+    row_fstr = "{!s:40}{color}{!s:15}" + TermColors.ENDC + "{!s:15}{!s:15}"
+    logger.info(f"{TermColors.BOLD}{row_fstr.format('res_name', 'surplus', 'sustainability', 'stockpile', color=TermColors.OKGREEN)}{TermColors.ENDC}")
     for res_id, prod_info in aggregate_prod_info.items():
         res_name = context.get_scn_info_el_name(res_id)
         surplus = prod_info.produced - prod_info.consumed
-        watches_sustainable_for = prod_info.available / surplus if surplus < 0 else "forever"
-        color = TermColors.FAIL if surplus < 0 else TermColors.OKGREEN
-        logger.info(f"{res_name:20}{color}{surplus!s:10}{TermColors.ENDC}{watches_sustainable_for!s:14}")
+        watches_sustainable_for = str(round(prod_info.available / surplus, 1)) if surplus < 0 else "forever"
+        color = TermColors.FAIL if surplus < 0 else TermColors.OKBLUE
+        # logger.info(f"{res_name:40}{color:4}{surplus:10.1f}{TermColors.ENDC:4}{watches_sustainable_for!s:>10}{prod_info.available!s:10}")
+        logger.info(row_fstr.format(
+            res_name,
+            str(round(surplus, 1)),
+            watches_sustainable_for,
+            "{:,}".format(prod_info.available),
+            color=color,
+        ))

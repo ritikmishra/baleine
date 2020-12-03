@@ -30,7 +30,6 @@ logging.basicConfig(level=logging.INFO, format=f'{TermColors.OKCYAN}%(asctime)s{
 
 async def main():
     logger = logging.getLogger("main")
-    fleet_names = ("roomba","roomba2","roomba3","roomba4","roomba5","roomba6")
     futures = []
     update_task = None
 
@@ -43,18 +42,24 @@ async def main():
         logger.info("Got objects!")
 
         await build_habitats_spaceports(context)
-        await decentralized_trade_route_manager(context, clean_slate=True, throttle=3)
-        # await calculate_resource_deficit(context)
+        # await decentralized_trade_route_manager(context, clean_slate=True, throttle=3, dry_run=True)
+        await calculate_resource_deficit(context)
         dump_state_to_json(context)
 
+        ## Connect worlds to a foundation
         # await connect_worlds_to_fnd(context, 4216)
 
+        ## Attack worlds around center world
         # capital = next(world for world in full_state if isinstance(world, World) and world.sovereign_id == SOV_ID)
         # possible_victims = [world for world in full_state if isinstance(world, World) and 0 < dist(world.pos, capital.pos) <= 200 and world.sovereign_id == 1]
         #
         # await conquest_tasks.conquer_planets(context, possible_victims, generic_hammer_fleets={"hammer"}, nail_fleets={"nail"})
 
+        ## Scan the galaxy
+        # fleet_names = ("roomba","roomba2","roomba3","roomba4","roomba5","roomba6")
         # futures.extend(asyncio.create_task(explore_unexplored_regions(context, fleet_name)) for fleet_name in fleet_names)
+
+        ## Send scout ships
         # await simple_tasks.scout_around_planet(context, center_world_id=99)
     finally:
         for future in futures:
