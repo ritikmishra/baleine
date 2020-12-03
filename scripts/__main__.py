@@ -8,7 +8,8 @@ from rx.operators import first
 
 from scripts.context import AnacreonContext
 from scripts.tasks import conquest_tasks
-from scripts.tasks.cluster_building import build_cluster, connect_worlds_to_fnd
+from scripts.tasks.cluster_building import build_cluster, connect_worlds_to_fnd, decentralized_trade_route_manager, \
+    calculate_resource_deficit
 from scripts.tasks.improvement_related_tasks import build_habitats_spaceports
 from scripts.tasks.simple_tasks import dump_state_to_json
 from scripts.utils import TermColors, dist
@@ -42,9 +43,9 @@ async def main():
         logger.info("Got objects!")
 
         await build_habitats_spaceports(context)
+        await decentralized_trade_route_manager(context, clean_slate=True, throttle=3)
+        # await calculate_resource_deficit(context)
         dump_state_to_json(context)
-
-        # await build_cluster(context, 99)
 
         # await connect_worlds_to_fnd(context, 4216)
 

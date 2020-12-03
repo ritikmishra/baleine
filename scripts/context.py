@@ -1,3 +1,4 @@
+from __future__ import  annotations
 import asyncio
 import collections
 import dataclasses
@@ -24,7 +25,7 @@ MilitaryForces = collections.namedtuple("MilitaryForces", ["space_forces", "grou
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True)
 class ProductionInfo:
     # resource_id: int = -1
     available: float = 0
@@ -36,6 +37,33 @@ class ProductionInfo:
     exported_optimal: float = 0
     imported_optimal: float = 0
     produced_optimal: float = 0
+
+    def __add__(self: ProductionInfo, other: ProductionInfo):
+        return ProductionInfo(
+            available=self.available + other.available,
+            consumed=self.consumed + other.consumed,
+            imported=self.imported + other.imported,
+            exported=self.exported + other.exported,
+            produced=self.produced + other.produced,
+            consumed_optimal=self.consumed_optimal + other.consumed_optimal,
+            exported_optimal=self.exported_optimal + other.exported_optimal,
+            imported_optimal=self.imported_optimal + other.imported_optimal,
+            produced_optimal=self.produced_optimal + other.produced_optimal,
+        )
+
+    def __sub__(self: ProductionInfo, other: ProductionInfo):
+        return ProductionInfo(
+            available=self.available - other.available,
+            consumed=self.consumed - other.consumed,
+            imported=self.imported - other.imported,
+            exported=self.exported - other.exported,
+            produced=self.produced - other.produced,
+            consumed_optimal=self.consumed_optimal - other.consumed_optimal,
+            exported_optimal=self.exported_optimal - other.exported_optimal,
+            imported_optimal=self.imported_optimal - other.imported_optimal,
+            produced_optimal=self.produced_optimal - other.produced_optimal,
+            )
+
 
 
 class AnacreonContext:
@@ -49,6 +77,7 @@ class AnacreonContext:
         self.watch_update_observable = Subject()
 
         self.game_info: ScenarioInfo
+        self.scenario_info_objects: Dict[int, ScenarioInfoElement]
 
         self.sf_calc = dict()
         self.gf_calc = dict()
@@ -131,6 +160,7 @@ class AnacreonContext:
         :return: None
         """
         self.game_info = await self.client.get_game_info(self.base_request.auth_token, self.base_request.game_id)
+        self.scenario_info_objects: Dict[int, ScenarioInfoElement] = {obj.id: obj for obj in self.game_info.scenario_info if obj.id is not None}
         for item in self.game_info.scenario_info:
             if item.attack_value is not None:
                 attack_value = float(item.attack_value)
@@ -227,6 +257,9 @@ class AnacreonContext:
             return next(obj for obj in self.state if isinstance(obj, AnacreonObjectWithId) and obj.id == id)
         except StopIteration:
             return None
+
+    def get_scn_info_el_name(self, res_id: int) -> str:
+        return self.scenario_info_objects[res_id].name_desc or str(res_id)
 
     def generate_production_info(self, world: Union[World, int]) -> Dict[int, ProductionInfo]:
         """
