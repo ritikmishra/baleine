@@ -73,7 +73,7 @@ async def fleet_walk(context: AnacreonContext, fleet_id: int, *,
         # Step 3: Let our caller attack the world/whatever it needs to do
         logger.info(f"Fleet arrived at planet ID {planet_id}")
 
-        # Step 4: Give our caller the world object and wait for them to send us back the
+        # Step 4: Give our caller the world object and wait for them to send us back the ranking order
         output_queue_ranking = yield next(
             world for world in context.state if isinstance(world, World) and world.id == planet_id)
 

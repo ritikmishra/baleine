@@ -12,10 +12,9 @@ from anacreonlib.types.response_datatypes import World, Fleet
 from anacreonlib.types.type_hints import BattleObjective
 
 from scripts.context import AnacreonContext, MilitaryForces
+from scripts.tasks import NameOrId
 from scripts.tasks.fleet_manipulation_utils import OrderedPlanetId, attack_fleet_walk
 from scripts.utils import TermColors
-
-NameOrId = Union[int, str]
 
 
 @dataclasses.dataclass

@@ -9,7 +9,7 @@ from typing import List, Tuple, Callable, Union, Dict, Optional
 from anacreonlib.anacreon_async_client import AnacreonAsyncClient
 from anacreonlib.types.request_datatypes import AnacreonApiRequest
 from anacreonlib.types.response_datatypes import AnacreonObject, AnacreonObjectWithId, UpdateObject, World, Trait, \
-    OwnedWorld
+    OwnedWorld, Fleet
 from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfo, ScenarioInfoElement
 from rx.subject import BehaviorSubject, Subject
 
@@ -73,6 +73,8 @@ class AnacreonContext:
         self.base_request = auth
 
         self._state: List[AnacreonObject] = []
+        self._state_dict: Dict[int, AnacreonObject] = {}
+
         self.any_update_observable = Subject()
         self.watch_update_observable = Subject()
 
@@ -101,9 +103,14 @@ class AnacreonContext:
         return self._state
 
     @state.setter
-    def state(self, new_state):
+    def state(self, new_state: List[AnacreonObject]):
         self._state = new_state
+        self._state_dict = {obj.id: obj for obj in new_state if isinstance(obj, AnacreonObjectWithId)}
         self.any_update_observable.on_next(self._state)
+
+    @property
+    def state_dict(self):
+        return self._state_dict
 
     def register_response(self, partial_state: List[AnacreonObject]) -> List[AnacreonObject]:
         """
@@ -254,8 +261,8 @@ class AnacreonContext:
 
     def get_obj_by_id(self, id: int) -> Optional[AnacreonObjectWithId]:
         try:
-            return next(obj for obj in self.state if isinstance(obj, AnacreonObjectWithId) and obj.id == id)
-        except StopIteration:
+            return self.state_dict[id]
+        except KeyError:
             return None
 
     def get_scn_info_el_name(self, res_id: int) -> str:
@@ -367,3 +374,22 @@ class AnacreonContext:
                             result[resource_id].available = resource_qty
 
         return {int(k): v for k, v in result.items()}
+
+    def calculate_remaining_cargo_space(self, fleet: Union[Fleet, int]) -> float:
+        if isinstance(fleet, int):
+            fleet_id = fleet
+            fleet: Fleet = self.get_obj_by_id(fleet)
+            if fleet is None:
+                raise LookupError(f"Could not find fleet with id {fleet_id}")
+
+        fleet_resources = utils.flat_list_to_tuples(fleet.resources)
+
+        remaining_cargo_space = 0
+        for res_id, qty in fleet_resources:
+            res_info: ScenarioInfoElement = self.scenario_info_objects[res_id]
+            if res_info.cargo_space:
+                remaining_cargo_space += res_info.cargo_space * qty
+            elif res_info.is_cargo and res_info.mass:
+                remaining_cargo_space -= res_info.mass * qty
+
+        return remaining_cargo_space

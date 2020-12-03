@@ -12,6 +12,7 @@ from scripts.tasks.cluster_building import build_cluster, connect_worlds_to_fnd,
     calculate_resource_deficit
 from scripts.tasks.improvement_related_tasks import build_habitats_spaceports
 from scripts.tasks.simple_tasks import dump_state_to_json
+from scripts.tasks.transportation_tasks import sell_stockpile_of_resource
 from scripts.utils import TermColors, dist
 
 try:
@@ -44,7 +45,8 @@ async def main():
         await build_habitats_spaceports(context)
         # await decentralized_trade_route_manager(context, clean_slate=True, throttle=3, dry_run=True)
         await calculate_resource_deficit(context)
-        dump_state_to_json(context)
+
+        await sell_stockpile_of_resource(context, "shuttle", "core.hexacarbide", {"Narnun (hex)"})
 
         ## Connect worlds to a foundation
         # await connect_worlds_to_fnd(context, 4216)
@@ -61,6 +63,8 @@ async def main():
 
         ## Send scout ships
         # await simple_tasks.scout_around_planet(context, center_world_id=99)
+
+        dump_state_to_json(context)
     finally:
         for future in futures:
             await future
