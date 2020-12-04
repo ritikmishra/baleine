@@ -76,7 +76,7 @@ async def sell_stockpile_of_resource(context: AnacreonContext, transport_fleet_n
             destination_queue.put_nowait(OrderedPlanetId(None, find_nearest_mesophon(world_after_arrival.pos).id))
 
             # load up on the resource
-            remaining_cargo_space = context.calculate_remaining_cargo_space(transport_fleet_id)
+            remaining_cargo_space = context.calculate_remaining_cargo_space(transport_fleet_id) * .98
             max_transportable_qty = remaining_cargo_space / resource_elem.mass
             qty_on_world = dict(utils.flat_list_to_tuples(world_after_arrival.resources))[resource_elem.id]
 

@@ -151,9 +151,12 @@ class AnacreonContext:
         """
         while True:
             wait_for_next_period = asyncio.create_task(asyncio.sleep(period))
-            partial_state = await self.client.get_objects(self.base_request)
-            full_state = self.register_response(partial_state)
-            self.watch_update_observable.on_next(full_state)
+            try:
+                partial_state = await self.client.get_objects(self.base_request)
+                full_state = self.register_response(partial_state)
+                self.watch_update_observable.on_next(full_state)
+            except Exception as e:
+                self._logger.error(f"Issue doing watch update! Message: {str(e)}", exc_info=True)
             await wait_for_next_period
 
     def __del__(self):
