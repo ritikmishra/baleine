@@ -4,6 +4,7 @@ import abc
 import asyncio
 import dataclasses
 import logging
+import traceback
 from asyncio import Future
 from itertools import chain
 from typing import List, Set, Union, Optional
@@ -31,7 +32,14 @@ class FleetBucket(abc.ABC):
 
     @abc.abstractmethod
     def can_attack_world(self, context: AnacreonContext, forces: MilitaryForces, world: World) -> bool:
-        """Determines if fleets in this bucket are allowed to attack a certain world"""
+        """
+        Determines if fleets in this bucket are allowed to attack a certain world
+
+        :param context: anacreon context
+        :param forces: forces of the world we are thinking about attacking
+        :param world: world we are about to attack
+        :return: true if we can attack it, false otherwise
+        """
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -48,7 +56,7 @@ class FleetBucket(abc.ABC):
 class HammerFleetBucket(FleetBucket):
     output_bucket: FleetBucket
     bucket_name: str = "HAMMER"
-    max_space_force: float = 7000
+    max_space_force: float = 30000
 
     def calculate_order(self, context: AnacreonContext, forces: MilitaryForces, world: World):
         return forces.space_forces
