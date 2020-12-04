@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import json
 import logging
@@ -133,7 +134,6 @@ async def send_fleet_to_worlds_meeting_predicate(context: AnacreonContext, sourc
         partial_state = await context.client.deploy_fleet(
             DeployFleetRequest(source_obj_id=source_obj_id, resources=dict_to_flat_list(resources), **context.base_request.dict(by_alias=True)))
 
-        print(partial_state)
         newest_fleet = max((fleet for fleet in partial_state if isinstance(fleet, Fleet)), key=lambda f: f.id)
         logger.info(f"Deployed fleet (name = '{newest_fleet.name}') (id = '{newest_fleet.id}')!")
         context.register_response(partial_state)
@@ -142,6 +142,7 @@ async def send_fleet_to_worlds_meeting_predicate(context: AnacreonContext, sourc
             SetFleetDestinationRequest(obj_id=newest_fleet.id, dest=world.id, **context.base_request.dict(by_alias=True)))
         logger.info(f"Sent fleet id {newest_fleet.id} to planet (name = '{world.name}') (id = '{world.id}')")
         context.register_response(partial_state)
+        await asyncio.sleep(3)
 
 
 async def scout_around_planet(context: AnacreonContext, center_world_id: int, radius=200, *, resource_dict=None,
