@@ -4,7 +4,6 @@ import abc
 import asyncio
 import dataclasses
 import logging
-import traceback
 from asyncio import Future
 from itertools import chain
 from typing import List, Set, Union, Optional
@@ -12,6 +11,7 @@ from typing import List, Set, Union, Optional
 from anacreonlib.types.response_datatypes import World, Fleet
 from anacreonlib.types.type_hints import BattleObjective
 
+from scripts import utils
 from scripts.context import AnacreonContext, MilitaryForces
 from scripts.tasks import NameOrId
 from scripts.tasks.fleet_manipulation_utils import OrderedPlanetId, attack_fleet_walk
@@ -144,6 +144,19 @@ class NailFleetBucket(FleetBucket):
             if self.should_decommission_fleet(context, this_fleet):
                 logger.info("Deciding to decommission this fleet, presumably due to low forces")
                 return
+
+
+async def conquer_independents_around_id(context: AnacreonContext, center_planet: NameOrId, *, radius=250, **kwargs):
+    capital = next(world for world in context.state
+                   if isinstance(world, World)
+                   and (world.name == center_planet or world.id == center_planet))
+    possible_victims = [world for world in context.state
+                        if isinstance(world, World)
+                        and world.sovereign_id == 1
+                        and world.resources is not None
+                        and 0 < utils.dist(world.pos, capital.pos) <= radius]
+
+    return await conquer_planets_using_buckets(context, possible_victims, **kwargs)
 
 
 async def conquer_planets(context: AnacreonContext, planets: Union[List[World], Set[NameOrId]], *,

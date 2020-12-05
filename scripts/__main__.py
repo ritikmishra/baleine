@@ -1,19 +1,16 @@
 import asyncio
 import logging
-import pprint
 
 from anacreonlib.types.request_datatypes import AnacreonApiRequest
-from anacreonlib.types.response_datatypes import World
 from rx.operators import first
 
 from scripts.context import AnacreonContext
 from scripts.tasks import conquest_tasks
-from scripts.tasks.cluster_building import build_cluster, connect_worlds_to_fnd, decentralized_trade_route_manager, \
-    calculate_resource_deficit
+from scripts.tasks.cluster_building import calculate_resource_deficit
 from scripts.tasks.improvement_related_tasks import build_habitats_spaceports
 from scripts.tasks.simple_tasks import dump_state_to_json
 from scripts.tasks.transportation_tasks import sell_stockpile_of_resource
-from scripts.utils import TermColors, dist
+from scripts.utils import TermColors
 
 try:
     from scripts.creds import ACCESS_TOKEN, GAME_ID, SOV_ID
@@ -26,7 +23,8 @@ auth = {
     "sovereign_id": SOV_ID
 }
 
-logging.basicConfig(level=logging.INFO, format=f'{TermColors.OKCYAN}%(asctime)s{TermColors.ENDC} - %(name)s - {TermColors.BOLD}%(levelname)s{TermColors.ENDC} - {TermColors.OKGREEN}%(message)s{TermColors.ENDC}')
+logging.basicConfig(level=logging.INFO,
+                    format=f'{TermColors.OKCYAN}%(asctime)s{TermColors.ENDC} - %(name)s - {TermColors.BOLD}%(levelname)s{TermColors.ENDC} - {TermColors.OKGREEN}%(message)s{TermColors.ENDC}')
 
 
 async def main():
@@ -46,16 +44,36 @@ async def main():
         # await decentralized_trade_route_manager(context, clean_slate=True, throttle=3, dry_run=True)
         await calculate_resource_deficit(context)
 
-        await sell_stockpile_of_resource(context, "shuttle", "core.hexacarbide", {"Narnun (hex)"})
+        # await scout_around_planet(context,
+        #                           center_world_id=(await find_next_sector_capital_worlds(context))[0].id,
+        #                           radius=250,
+        #                           resource_dict={101: 2},
+        #                           source_obj_id=99
+        #                           )
+
+        ## Sell a stockpile of resources to the mesophons
+        futures.append(asyncio.create_task(sell_stockpile_of_resource(context, "shuttle", "core.hexacarbide",
+                                                                      {"BR 1405 (hex)", "Lesser Nishapur (hex)"})))
 
         ## Connect worlds to a foundation
         # await connect_worlds_to_fnd(context, 4216)
 
         ## Attack worlds around center world
-        # capital = next(world for world in full_state if isinstance(world, World) and world.sovereign_id == SOV_ID)
-        # possible_victims = [world for world in full_state if isinstance(world, World) and 0 < dist(world.pos, capital.pos) <= 200 and world.sovereign_id == 1]
-        #
-        # await conquest_tasks.conquer_planets(context, possible_victims, generic_hammer_fleets={"hammer"}, nail_fleets={"nail"})
+        futures.append(asyncio.create_task(
+            conquest_tasks.conquer_independents_around_id(context,
+                                                          "tears",
+                                                          generic_hammer_fleets={"hammer"},
+                                                          anti_missile_hammer_fleets={"Missile Yummer"},
+                                                          nail_fleets={"nail"})
+        ))
+
+        ## Attack worlds around romere
+        futures.append(asyncio.create_task(
+            conquest_tasks.conquer_independents_around_id(context,
+                                           4868,
+                                           generic_hammer_fleets={"ldham"},
+                                           nail_fleets={"ldnail"})
+        ))
 
         ## Scan the galaxy
         # fleet_names = ("roomba","roomba2","roomba3","roomba4","roomba5","roomba6")
@@ -69,6 +87,7 @@ async def main():
         for future in futures:
             await future
         update_task.cancel()
+
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
