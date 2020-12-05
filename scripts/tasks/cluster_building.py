@@ -88,6 +88,50 @@ abundant_resource_to_desig_id_map = {
 TL_8_WORLD_CLASSES = {92, 271, 113}  # ocean, earth-like, underground planets can build planetary arcologies
 
 
+def get_preferred_resource_desig(context: AnacreonContext, world: World) -> Optional[int]:
+    """
+    If this planet is abundant in any resources, recommend that it is designated as a
+    resource extractor for that resource
+    :return: None if planet is not abundant in any resources, or the preferred desig id if it is.
+    """
+    return next((extractor_desig_id
+                 for abundant_trait_id, extractor_desig_id in abundant_resource_to_desig_id_map.items()
+                 if utils.world_has_trait(context.game_info.scenario_info, world, abundant_trait_id)),
+                default=None)
+
+
+async def designate_low_tl_worlds(context: AnacreonContext):
+    """
+    Goes through all of our worlds and designates them if they are undesignated and low tech level
+    :param context:
+    :return: none
+    """
+    logger = logging.getLogger("Designate low TL worlds")
+
+    autonomous_desig_id: int = context.get_scn_info_el_unid("core.autonomousDesignation").id
+    cgaf_desig_id: int = context.get_scn_info_el_unid("core.consumerGoodsDesignation").id
+
+    worlds_to_designate: List[OwnedWorld] = [world for world in context.state
+                                             if isinstance(world, OwnedWorld)
+                                             and world.tech_level < 5
+                                             and world.designation == autonomous_desig_id]
+
+    for world in worlds_to_designate:
+        preferred_desig = get_preferred_resource_desig(context, world) or cgaf_desig_id
+        if (context.scenario_info_objects[preferred_desig].min_tech_level or 10) > world.tech_level:
+            preferred_desig = cgaf_desig_id
+        try:
+            partial_state = await context.client.designate_world(DesignateWorldRequest(
+                source_obj_id=world.id,
+                new_designation=preferred_desig,
+                **context.auth
+            ))
+            context.register_response(partial_state)
+        except HexArcException as e:
+            logger.error(f"Encountered exception trying to designate world name `{world.name}` id {world.id}")
+            logger.error(e)
+
+
 async def build_cluster(context: AnacreonContext, center_world_id: int, radius: float = 200):
     logger = logging.getLogger("cluster builder")
 
@@ -101,23 +145,21 @@ async def build_cluster(context: AnacreonContext, center_world_id: int, radius: 
     logger.info(
         f"There are {len(worlds_in_cluster)} worlds in the cluster surrounding {center_world.name} (id {center_world.id})")
 
-    world_has_trait: Callable[[World, int], bool] = functools.partial(utils.world_has_trait,
-                                                                      context.game_info.scenario_info)
     for world in worlds_in_cluster:
-        for abundant_trait_id, extractor_desig_id in abundant_resource_to_desig_id_map.items():
-            if world_has_trait(world, abundant_trait_id) and world.designation != extractor_desig_id:
-                try:
-                    req = DesignateWorldRequest(source_obj_id=world.id, new_designation=extractor_desig_id,
-                                                **context.auth)
-                    partial_state = await context.client.designate_world(req)
-                    logger.info(f"Designated {world.name} (id {world.id}) as resource extractor")
-                except HexArcException:
-                    req = RenameObjectRequest(obj_id=world.id,
-                                              name=f"{world.id} future extractor {extractor_desig_id}",
-                                              **context.auth)
-                    partial_state = await context.client.rename_object(req)
-                    logger.info(f"Marked {world.name} (id {world.id}) as resource extractor")
-                context.register_response(partial_state or [])
+        extractor_desig_id = get_preferred_resource_desig(context, world)
+        if extractor_desig_id is not None and world.designation != extractor_desig_id:
+            try:
+                req = DesignateWorldRequest(source_obj_id=world.id, new_designation=extractor_desig_id,
+                                            **context.auth)
+                partial_state = await context.client.designate_world(req)
+                logger.info(f"Designated {world.name} (id {world.id}) as resource extractor")
+            except HexArcException:
+                req = RenameObjectRequest(obj_id=world.id,
+                                          name=f"{world.id} future extractor {extractor_desig_id}",
+                                          **context.auth)
+                partial_state = await context.client.rename_object(req)
+                logger.info(f"Marked {world.name} (id {world.id}) as resource extractor")
+            context.register_response(partial_state or [])
 
 
 async def connect_worlds_to_fnd(context: AnacreonContext, fnd_id: int, worlds: Optional[List[World]] = None):

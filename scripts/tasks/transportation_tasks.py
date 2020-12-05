@@ -57,8 +57,13 @@ async def sell_stockpile_of_resource(context: AnacreonContext, transport_fleet_n
                                 if el.name is not None
                                 and "mesophon" in el.name.lower())
 
+    world_queue: asyncio.Queue = asyncio.PriorityQueue()
+    for world in worlds_with_stockpile:
+        amount_of_resource_on_world = dict(utils.flat_list_to_tuples(world.resources))[resource_elem.id]
+        world_queue.put_nowait(OrderedPlanetId(-amount_of_resource_on_world, world.id))
+
     destination_queue: asyncio.Queue = asyncio.Queue()
-    destination_queue.put_nowait(OrderedPlanetId(None, worlds_with_stockpile[0].id))
+    destination_queue.put_nowait(OrderedPlanetId(None, world_queue.get_nowait().id))
 
     def find_nearest_mesophon(pos: Location) -> World:
         return min((world for world in context.state
@@ -88,6 +93,9 @@ async def sell_stockpile_of_resource(context: AnacreonContext, transport_fleet_n
                 destination_queue.put_nowait(OrderedPlanetId(None, world_after_arrival.id))
             else:
                 qty_to_carry = qty_on_world
+                world_queue.task_done()
+                destination_queue.put_nowait(world_queue.get_nowait())
+
 
             logger.info(f"Putting {qty_to_carry:,} units of {resource_elem.name_desc} in fleet cargo hold")
             partial_state = await context.client.transfer_fleet(TransferFleetRequest(fleet_obj_id=transport_fleet_id,

@@ -83,7 +83,7 @@ class AnacreonContext:
 
         self.sf_calc = dict()
         self.gf_calc = dict()
-        self.missile_calc = {1: 0.0, 244: 0.0, 142: 0.0}
+        self.missile_calc = {1: 0.0, 142: 0.0, 27: 0.0, 38: 0.0}
         self.maneuvering_unit_calc = dict()
 
         self.watch_update_observable.subscribe(lambda _: self._logger.info("Watch update triggered!"))
@@ -96,6 +96,7 @@ class AnacreonContext:
     async def create(auth: AnacreonApiRequest):
         ret = AnacreonContext(auth)
         await ret._generate_force_calculation_dict()
+        ret.trait_inherits_from_trait = functools.partial(utils.trait_inherits_from_trait, ret.game_info.scenario_info)
         return ret
 
     @property
@@ -111,6 +112,9 @@ class AnacreonContext:
     @property
     def state_dict(self):
         return self._state_dict
+
+    def trait_inherits_from_trait(self, child_trait: Union[Trait, int], parent_trait: Union[Trait, int]) -> bool:
+        raise NotImplementedError("To use this method, you need to create your AnacreonContext using `AnacreonContext.create`")
 
     def register_response(self, partial_state: List[AnacreonObject]) -> List[AnacreonObject]:
         """
@@ -396,3 +400,7 @@ class AnacreonContext:
                 remaining_cargo_space -= res_info.mass * qty
 
         return remaining_cargo_space
+
+    def get_scn_info_el_unid(self, unid: str) -> ScenarioInfoElement:
+        return next(v for k, v in self.scenario_info_objects.items()
+                    if v.unid == unid)
