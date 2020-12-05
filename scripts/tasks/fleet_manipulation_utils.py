@@ -10,7 +10,7 @@ from rx.operators import first
 
 from scripts.context import AnacreonContext
 
-OrderedPlanetId = collections.namedtuple("ForcePlanetIdPair", ["order", "id"])
+OrderedPlanetId = collections.namedtuple("OrderedPlanetId", ["order", "id"])
 """Allows for putting planet IDs into a PriorityQueue or similar construct"""
 
 
