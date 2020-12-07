@@ -97,7 +97,7 @@ def get_preferred_resource_desig(context: AnacreonContext, world: World) -> Opti
     return next((extractor_desig_id
                  for abundant_trait_id, extractor_desig_id in abundant_resource_to_desig_id_map.items()
                  if utils.world_has_trait(context.game_info.scenario_info, world, abundant_trait_id)),
-                default=None)
+                None)
 
 
 async def designate_low_tl_worlds(context: AnacreonContext):
@@ -121,6 +121,7 @@ async def designate_low_tl_worlds(context: AnacreonContext):
         if (context.scenario_info_objects[preferred_desig].min_tech_level or 10) > world.tech_level:
             preferred_desig = cgaf_desig_id
         try:
+            logger.info(f"going to designate {world.name} (id {world.id}) as desig id {preferred_desig}")
             partial_state = await context.client.designate_world(DesignateWorldRequest(
                 source_obj_id=world.id,
                 new_designation=preferred_desig,
