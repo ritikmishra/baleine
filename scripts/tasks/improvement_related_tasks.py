@@ -20,7 +20,7 @@ async def build_habitats_spaceports(context: AnacreonContext):
 
     construction_orders = []
 
-    logger.info("Beginning to iterate through planets")
+    logger.debug("Beginning to iterate through planets")
     for planet in context.state:
         if isinstance(planet, World):
             if int(planet.sovereign_id) == int(context.base_request.sovereign_id):
@@ -51,4 +51,4 @@ async def build_habitats_spaceports(context: AnacreonContext):
 
     if len(construction_orders) == 0:
         logger.info("No structures to build")
-    logger.info("Done building improvements across the empire")
+    logger.debug("Done building improvements across the empire")
