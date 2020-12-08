@@ -5,11 +5,10 @@ from anacreonlib.types.request_datatypes import AnacreonApiRequest
 from rx.operators import first
 
 from scripts.context import AnacreonContext
-from scripts.tasks import conquest_tasks
+from scripts.tasks import conquest_tasks, cluster_building
 from scripts.tasks.cluster_building import calculate_resource_deficit
 from scripts.tasks.improvement_related_tasks import build_habitats_spaceports
 from scripts.tasks.simple_tasks import dump_state_to_json
-from scripts.tasks.transportation_tasks import sell_stockpile_of_resource
 from scripts.utils import TermColors
 
 try:
@@ -30,17 +29,27 @@ logging.basicConfig(level=logging.INFO,
 async def main():
     logger = logging.getLogger("main")
     futures = []
-    update_task = None
+    daemon_tasks: list = []
 
     context = await AnacreonContext.create(AnacreonApiRequest(**auth))
     try:
-        update_task = asyncio.create_task(context.periodically_update_objects())
+
+        async def on_every_watch():
+            """builds spaceports and designates low tl worlds on every watch"""
+            while True:
+                await context.watch_update_observable.pipe(first())
+                await asyncio.gather(
+                    build_habitats_spaceports(context),
+                    cluster_building.designate_low_tl_worlds(context)
+                )
+
+        daemon_tasks.append(asyncio.create_task(on_every_watch()))
+        daemon_tasks.append(asyncio.create_task(context.periodically_update_objects()))
 
         logger.info("Waiting to get objects")
         full_state = await context.watch_update_observable.pipe(first())
         logger.info("Got objects!")
 
-        await build_habitats_spaceports(context)
         # await decentralized_trade_route_manager(context, clean_slate=True, throttle=3, dry_run=True)
         await calculate_resource_deficit(context)
 
@@ -50,10 +59,11 @@ async def main():
         #                           resource_dict={101: 2},
         #                           source_obj_id=99
         #                           )
+        dump_state_to_json(context)
 
         ## Sell a stockpile of resources to the mesophons
-        futures.append(asyncio.create_task(sell_stockpile_of_resource(context, "shuttle", "core.hexacarbide",
-                                                                      {"BR 1405 (hex)", "Lesser Nishapur (hex)"})))
+        # futures.append(asyncio.create_task(sell_stockpile_of_resource(context, "shuttle", "core.hexacarbide",
+        #                                                               {"BR 1405 (hex)", "Lesser Nishapur (hex)"})))
 
         ## Connect worlds to a foundation
         # await connect_worlds_to_fnd(context, 4216)
@@ -61,19 +71,11 @@ async def main():
         ## Attack worlds around center world
         futures.append(asyncio.create_task(
             conquest_tasks.conquer_independents_around_id(context,
-                                                          "tears",
+                                                          {"tears", "Romere"},
                                                           generic_hammer_fleets={"hammer"},
-                                                          anti_missile_hammer_fleets={"Missile Yummer"},
                                                           nail_fleets={"nail"})
         ))
 
-        ## Attack worlds around romere
-        futures.append(asyncio.create_task(
-            conquest_tasks.conquer_independents_around_id(context,
-                                           4868,
-                                           generic_hammer_fleets={"ldham"},
-                                           nail_fleets={"ldnail"})
-        ))
 
         ## Scan the galaxy
         # fleet_names = ("roomba","roomba2","roomba3","roomba4","roomba5","roomba6")
@@ -86,7 +88,8 @@ async def main():
     finally:
         for future in futures:
             await future
-        update_task.cancel()
+        for task in daemon_tasks:
+            task.cancel()
 
 
 if __name__ == '__main__':

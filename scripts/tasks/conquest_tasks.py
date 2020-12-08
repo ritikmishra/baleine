@@ -56,7 +56,7 @@ class FleetBucket(abc.ABC):
 class HammerFleetBucket(FleetBucket):
     output_bucket: FleetBucket
     bucket_name: str = "HAMMER"
-    max_space_force: float = 30000
+    max_space_force: float = 50000
 
     def calculate_order(self, context: AnacreonContext, forces: MilitaryForces, world: World):
         return forces.space_forces
@@ -110,8 +110,8 @@ class AntiMissileHammerFleetBucket(HammerFleetBucket):
 @dataclasses.dataclass
 class NailFleetBucket(FleetBucket):
     bucket_name: str = "NAIL"
-    max_ground_force: float = 20
-    max_space_force: float = 100
+    max_ground_force: float = 100
+    max_space_force: float = 1000
     output_bucket: None = None
 
     def calculate_order(self, context: AnacreonContext, forces: MilitaryForces, world: World) -> float:
@@ -146,17 +146,19 @@ class NailFleetBucket(FleetBucket):
                 return
 
 
-async def conquer_independents_around_id(context: AnacreonContext, center_planet: NameOrId, *, radius=250, **kwargs):
-    capital = next(world for world in context.state
-                   if isinstance(world, World)
-                   and (world.name == center_planet or world.id == center_planet))
+async def conquer_independents_around_id(context: AnacreonContext, center_planet: Set[NameOrId], *, radius=250,
+                                         **kwargs):
+    capitals = [world for world in context.state
+                if isinstance(world, World)
+                and world.efficiency > 20
+                and (world.name in center_planet or world.id in center_planet)]
     possible_victims = [world for world in context.state
                         if isinstance(world, World)
                         and world.sovereign_id == 1
                         and world.resources is not None
-                        and 0 < utils.dist(world.pos, capital.pos) <= radius]
+                        and any(0 < utils.dist(world.pos, capital.pos) <= radius for capital in capitals)]
 
-    return await conquer_planets_using_buckets(context, possible_victims, **kwargs)
+    return await conquer_planets(context, possible_victims, **kwargs)
 
 
 async def conquer_planets(context: AnacreonContext, planets: Union[List[World], Set[NameOrId]], *,
