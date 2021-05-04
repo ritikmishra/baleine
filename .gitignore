@@ -3,3 +3,4 @@ creds.py
 .idea/
 __pycache__/
 *.pyc
+.mypy_cache/
