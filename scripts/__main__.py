@@ -1,9 +1,13 @@
 import asyncio
 import logging
+from scripts.tasks.garbage_collect_trade_routes import garbage_collect_trade_routes
+from scripts.tasks.balance_trade_routes import balance_trade_routes
+from typing import Awaitable, List
 
 from anacreonlib.types.request_datatypes import AnacreonApiRequest
 from rx.operators import first
 
+from scripts import utils, filters
 from scripts.context import AnacreonContext
 from scripts.tasks import conquest_tasks, cluster_building
 from scripts.tasks.cluster_building import calculate_resource_deficit
@@ -16,42 +20,50 @@ try:
 except ImportError:
     raise LookupError("Could not find creds.py in scripts package! Did you make one?")
 
-auth = {
-    "auth_token": ACCESS_TOKEN,
-    "game_id": GAME_ID,
-    "sovereign_id": SOV_ID
-}
+auth = {"auth_token": ACCESS_TOKEN, "game_id": GAME_ID, "sovereign_id": SOV_ID}
 
-logging.basicConfig(level=logging.INFO,
-                    format=f'{TermColors.OKCYAN}%(asctime)s{TermColors.ENDC} - %(name)s - {TermColors.BOLD}%(levelname)s{TermColors.ENDC} - {TermColors.OKGREEN}%(message)s{TermColors.ENDC}')
+logging.basicConfig(
+    level=logging.INFO,
+    format=f"{TermColors.OKCYAN}%(asctime)s{TermColors.ENDC} - %(name)s - {TermColors.BOLD}%(levelname)s{TermColors.ENDC} - {TermColors.OKGREEN}%(message)s{TermColors.ENDC}",
+)
 
 
-async def main():
+async def main() -> None:
     logger = logging.getLogger("main")
-    futures = []
+    futures: List[Awaitable] = []
     daemon_tasks: list = []
 
     context = await AnacreonContext.create(AnacreonApiRequest(**auth))
     try:
 
-        async def on_every_watch():
+        async def on_every_watch() -> None:
             """builds spaceports and designates low tl worlds on every watch"""
             while True:
                 await context.watch_update_observable.pipe(first())
                 await asyncio.gather(
                     build_habitats_spaceports(context),
-                    cluster_building.designate_low_tl_worlds(context)
+                    cluster_building.designate_low_tl_worlds(context),
                 )
 
+        async def every_hour() -> None:
+            """garbage collect trade routes every hour"""
+            while True:
+                await context.watch_update_observable.pipe(first())
+                await asyncio.gather(garbage_collect_trade_routes(context))
+
         daemon_tasks.append(asyncio.create_task(on_every_watch()))
+        daemon_tasks.append(asyncio.create_task(every_hour()))
         daemon_tasks.append(asyncio.create_task(context.periodically_update_objects()))
 
         logger.info("Waiting to get objects")
         full_state = await context.watch_update_observable.pipe(first())
         logger.info("Got objects!")
 
-        # await decentralized_trade_route_manager(context, clean_slate=True, throttle=3, dry_run=True)
-        await calculate_resource_deficit(context)
+        await cluster_building.calculate_resource_deficit(context, exports_only=True)
+
+        # await balance_trade_routes(context)
+
+        # await cluster_building.decentralized_trade_route_manager(context, clean_slate=False, throttle=3, dry_run=False, filter=filters.dist_filter(context, "tears", 250))
 
         # await scout_around_planet(context,
         #                           center_world_id=(await find_next_sector_capital_worlds(context))[0].id,
@@ -59,7 +71,6 @@ async def main():
         #                           resource_dict={101: 2},
         #                           source_obj_id=99
         #                           )
-        dump_state_to_json(context)
 
         ## Sell a stockpile of resources to the mesophons
         # futures.append(asyncio.create_task(sell_stockpile_of_resource(context, "shuttle", "core.hexacarbide",
@@ -69,13 +80,12 @@ async def main():
         # await connect_worlds_to_fnd(context, 4216)
 
         ## Attack worlds around center world
-        futures.append(asyncio.create_task(
-            conquest_tasks.conquer_independents_around_id(context,
-                                                          {"tears", "Romere"},
-                                                          generic_hammer_fleets={"hammer"},
-                                                          nail_fleets={"nail"})
-        ))
-
+        # futures.append(asyncio.create_task(
+        #     conquest_tasks.conquer_independents_around_id(context,
+        #                                                   {"tears", "Romere"},
+        #                                                   generic_hammer_fleets={"hammer"},
+        #                                                   nail_fleets={"nail"})
+        # ))
 
         ## Scan the galaxy
         # fleet_names = ("roomba","roomba2","roomba3","roomba4","roomba5","roomba6")
@@ -92,6 +102,6 @@ async def main():
             task.cancel()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())

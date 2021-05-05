@@ -20,6 +20,7 @@ def flat_list_to_n_tuples(n: int, lst: List[T]) -> List[Tuple[T, ...]]:
     zip_args = [lst[i::n] for i in range(n)]
     return list(zip(*zip_args))
 
+
 def dict_to_flat_list(dict: Dict[T, U]) -> List[Union[T, U]]:
     """
     Convert a dict to a flat list alternating between keys and values
@@ -67,7 +68,7 @@ def world_has_trait(scninfo: List[ScenarioInfoElement], world: World, target_tra
 
 
 def trait_inherits_from_trait(scninfo: List[ScenarioInfoElement], child_trait: Union[Trait, int],
-                              parent_trait: Union[Trait, int]):
+                              parent_trait: Union[Trait, int]) -> bool:
     """
     Checks if trait_a inherits from trait_b i.e
     trait_a extends trait_b
@@ -79,7 +80,8 @@ def trait_inherits_from_trait(scninfo: List[ScenarioInfoElement], child_trait: U
     try:
         # looks up up trait in scenario info based on id. information from Trait object is not used.
         childs_parent_list = next(trait.inherit_from for trait in scninfo
-                                  if trait.id == child_trait or (isinstance(child_trait, Trait) and trait.id == child_trait.trait_id))
+                                  if trait.id == child_trait or (
+                                              isinstance(child_trait, Trait) and trait.id == child_trait.trait_id))
         if childs_parent_list is None:
             return False
 
@@ -108,12 +110,14 @@ def world_has_fully_built_trait(scninfo: List[ScenarioInfoElement], world: World
             and trait_under_construction(world.squashed_trait_dict, target_trait_id))
 
 
-def type_supercedes_type(scninfo: List[ScenarioInfoElement], later_improvement_id: int, earlier_improvement_id: int) -> bool:
+def type_supercedes_type(scninfo: List[ScenarioInfoElement], later_improvement_id: int,
+                         earlier_improvement_id: int) -> bool:
     """Returns True if trait_a needs trait_b to be built first at some point"""
     later_improvement = scninfo[later_improvement_id]
     if later_improvement.build_upgrade is not None:
         return (earlier_improvement_id in later_improvement.build_upgrade
-                or any(type_supercedes_type(scninfo, trait, earlier_improvement_id) for trait in later_improvement.build_upgrade))
+                or any(type_supercedes_type(scninfo, trait, earlier_improvement_id) for trait in
+                       later_improvement.build_upgrade))
     return False
 
 class TermColors:
