@@ -40,7 +40,7 @@ async def garbage_collect_trade_routes(context: AnacreonContext) -> None:
             planet_id_a=pair.src, planet_id_b=pair.dst, **context.auth
         )
 
-        logging.info(
+        logger.info(
             f"({i + 1} of {len(garbage_trade_routes)}) Cancelling trade route for planet pair {pair}"
         )
 
@@ -71,7 +71,7 @@ def is_trade_route_garbage(route: TradeRoute) -> bool:
     garbage_exports = route.exports is None or unidirectional_garbage(route.exports)
     return (
         garbage_imports
-        and garbage_imports
+        and garbage_exports
         and route.export_tech is None
         and route.import_tech is None
     )
