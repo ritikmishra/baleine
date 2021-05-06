@@ -1,22 +1,18 @@
+import asyncio
 import functools
 import logging
-import collections
 from pprint import pprint
 from dataclasses import replace, dataclass
 from scripts import utils
 from anacreonlib.types.type_hints import Location
 from typing import (
     Callable,
-    DefaultDict,
     Dict,
-    Generic,
     List,
     Optional,
     Set,
     Tuple,
-    TypeVar,
     Union,
-    cast,
 )
 
 from anacreonlib.types.request_datatypes import SetTradeRouteRequest, TradeRouteTypes
@@ -78,7 +74,9 @@ class PlanetPair:
 
 
 async def balance_trade_routes(
-    context: AnacreonContext, filter: WorldFilter = lambda w: True
+    context: AnacreonContext,
+    filter: WorldFilter = lambda w: True,
+    dry_run: bool = True,
 ) -> None:
     logger = logging.getLogger("trade route balancer")
 
@@ -102,14 +100,27 @@ async def balance_trade_routes(
         if desig.exports is not None:
             x = desig.exports
             resource_ids.update(desig.exports)
-    for resource_id in resource_ids:
-        print(f"{resource_id}\t{context.scenario_info_objects[resource_id].name_desc}")
 
-    await balance_routes_for_one_resource(context, our_worlds, 260)  # 260 is trillum
+    logger.info("resource_id\tresource name")
+    for resource_id in resource_ids:
+        logger.info(
+            f"{resource_id}\t{context.scenario_info_objects[resource_id].name_desc}"
+        )
+
+    # 260 is trillum
+    # await balance_routes_for_one_resource(context, our_worlds, 260, dry_run)
+
+    for resource_id in resource_ids:
+        await balance_routes_for_one_resource(
+            context, our_worlds, resource_id, dry_run=dry_run
+        )
 
 
 async def balance_routes_for_one_resource(
-    context: AnacreonContext, our_worlds: Dict[int, OwnedWorld], resource_id: int
+    context: AnacreonContext,
+    our_worlds: Dict[int, OwnedWorld],
+    resource_id: int,
+    dry_run: bool = False,
 ) -> None:
     logger = logging.getLogger("balance_routes_for_one_resource")
 
@@ -198,7 +209,7 @@ async def balance_routes_for_one_resource(
                         else:
                             amount_transferred = 0
 
-                        if amount_transferred != 0 and pct_of_demand:
+                        if pct_of_demand:
                             graph_edges[
                                 PlanetPair(trading_partner_id, world_id)
                             ] = ResourceGraphEdge(
@@ -222,37 +233,33 @@ async def balance_routes_for_one_resource(
         if isinstance(node, ResourceImporterGraphNode)
     }
 
-    print("### nodes ###")
-    pprint(exporter_worlds)
-    pprint(importer_worlds)
-
-    print("\n\n### edges ###")
-    pprint(graph_edges)
-
     total_produced = sum(x.exportable_qty for x in exporter_worlds.values())
     total_desired_imports = sum(x.required_import_qty for x in importer_worlds.values())
-
-    print(f"{total_produced=}")
-    print(f"{total_desired_imports=}")
-    print(f"{(total_produced - total_desired_imports)=}")
 
     # new_edges = bootstrap_graph_edges(importer_worlds, exporter_worlds, position_dict)
     new_edges = adjust_graph_edges(
         importer_worlds, exporter_worlds, position_dict, graph_edges
     )
 
-    requests = await apply_graph_edge_changes(
+    requests = compile_graph_edge_changes(
         context, resource_id, importer_worlds, graph_edges, new_edges
     )
 
     logger.info(
-        f"about to make {len(requests)} trade route requests to alter the {context.scenario_info_objects[resource_id].name_desc} ({resource_id=}) economy"
+        f"{len(requests)} trade route requests desired to alter the {context.scenario_info_objects[resource_id].name_desc} ({resource_id=}) economy"
+    )
+    logger.info(
+        f"\tFor resource {resource_id}, we are making {(total_produced - total_desired_imports)=} surplus per watch\n"
     )
 
     for i, req in enumerate(requests):
-        logger.info(f"req {i + 1} of {len(requests)}")
-        pprint(req)
-        # await context.client.set_trade_route(req)
+        # logger.info(f"req {i + 1} of {len(requests)}")
+        # pprint(req)
+        if not dry_run:
+            try:
+                await context.client.set_trade_route(req)
+            except asyncio.exceptions.TimeoutError:
+                requests.append(req)
 
 
 def bootstrap_graph_edges(
@@ -429,7 +436,8 @@ def adjust_graph_edges(
             else:
                 assert surplusiest_exporter_surplus > 0
                 assert exporter_id in overworked_exporter_ids
-                assert surplusiest_exporter_id not in overworked_exporter_ids
+                assert surplusiest_exporter_id != exporter_id
+                # assert surplusiest_exporter_id not in overworked_exporter_ids
 
                 # how much is this guy importing from us right now??
                 importer = importers[importer_id]
@@ -439,7 +447,7 @@ def adjust_graph_edges(
                 # we can afford to switch over this importer to the other exporter
                 if (
                     amount_to_possibly_get_back > 0
-                    and amount_to_possibly_get_back > surplusiest_exporter_surplus
+                    and amount_to_possibly_get_back < surplusiest_exporter_surplus
                 ):
                     # then switch it over!
 
@@ -487,16 +495,70 @@ def adjust_graph_edges(
 
     del overworked_exporters
 
+    # now we check on planets that are not connected to any exporter
+    unconnected_importers = sorted(
+        (
+            importer
+            for importer_id, importer in importers.items()
+            if importer.actual_import_qty == 0
+            and importer.required_import_qty != 0
+            and all(importer_id != pair.dst for pair in ret.keys())
+        ),
+        key=lambda imp: imp.required_import_qty,
+    )
+
+    for importer in unconnected_importers:
+        importer_id = importer.world_id
+        maybe_nearby_exporter = most_surplusiest_nearby_exporter(importer_id)
+
+        if maybe_nearby_exporter is None:
+            continue
+
+        (
+            surplusiest_exporter_surplus,
+            surplusiest_exporter_id,
+        ) = maybe_nearby_exporter
+
+        if surplusiest_exporter_surplus > importer.required_import_qty > 0:
+            logger.info(
+                f"connecting previously unconnected {importer_id=} to import {importer.required_import_qty} from exporter id {surplusiest_exporter_id}"
+            )
+            ret[PlanetPair(surplusiest_exporter_id, importer_id)] = ResourceGraphEdge(
+                surplusiest_exporter_id, importer_id, importer.required_import_qty
+            )
+
+            exporters[surplusiest_exporter_id] = replace(
+                (old_exporter_val := exporters[surplusiest_exporter_id]),
+                desired_export_qty=old_exporter_val.desired_export_qty
+                + importer.required_import_qty,
+            )
+            importers[importer_id] = replace(
+                importer,
+                actual_import_qty=importer.required_import_qty,
+            )
+
     return ret
 
 
-async def apply_graph_edge_changes(
+def compile_graph_edge_changes(
     context: AnacreonContext,
     resource_id: int,
     importers: Dict[int, ResourceImporterGraphNode],
     old_graph_edges: Dict[PlanetPair, ResourceGraphEdge],
     new_graph_edges: Dict[PlanetPair, ResourceGraphEdge],
 ) -> List[SetTradeRouteRequest]:
+    """Turns changes in the import graph for one resource into request bodies that can then be sent to the Anacreon API
+
+    Args:
+        context (AnacreonContext): context (used only for context.auth)
+        resource_id (int): Resource ID for which the graph edges represent trading
+        importers (Dict[int, ResourceImporterGraphNode]): A dict of all importer planets on the trade graph
+        old_graph_edges (Dict[PlanetPair, ResourceGraphEdge]): The trage graph that currently exists
+        new_graph_edges (Dict[PlanetPair, ResourceGraphEdge]): The trade graph that we would like to switch to
+
+    Returns:
+        List[SetTradeRouteRequest]: All the trade route changes that need to be made in order to apply the new edges
+    """
     logger = logging.getLogger("apply_graph_edge_changes")
 
     create_trade_route_request = functools.partial(

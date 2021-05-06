@@ -52,7 +52,7 @@ async def main() -> None:
                 await asyncio.gather(garbage_collect_trade_routes(context))
 
         daemon_tasks.append(asyncio.create_task(on_every_watch()))
-        daemon_tasks.append(asyncio.create_task(every_hour()))
+        # daemon_tasks.append(asyncio.create_task(every_hour()))
         daemon_tasks.append(asyncio.create_task(context.periodically_update_objects()))
 
         logger.info("Waiting to get objects")
@@ -61,7 +61,7 @@ async def main() -> None:
 
         await cluster_building.calculate_resource_deficit(context, exports_only=True)
 
-        # await balance_trade_routes(context)
+        await balance_trade_routes(context)
 
         # await cluster_building.decentralized_trade_route_manager(context, clean_slate=False, throttle=3, dry_run=False, filter=filters.dist_filter(context, "tears", 250))
 
