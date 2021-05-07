@@ -42,8 +42,11 @@ class ResourceImporterGraphNode:
     # How much of the resource we *need* to import
     required_import_qty: float
 
-    #
+    # How much of the resource we would like to consume/be importing
     actual_import_qty: float
+
+    # How much of the resource we consumed (takes stockpiles into account)
+    stockpile_consumed_qty: float
 
 
 @dataclass(frozen=True)
@@ -76,7 +79,7 @@ class PlanetPair:
 async def balance_trade_routes(
     context: AnacreonContext,
     filter: WorldFilter = lambda w: True,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> None:
     logger = logging.getLogger("trade route balancer")
 
@@ -165,6 +168,8 @@ async def balance_routes_for_one_resource(
                 world_id=world_id,
                 required_import_qty=world_prod_info.consumed_optimal,
                 actual_import_qty=world_prod_info.imported_optimal,
+                stockpile_consumed_qty=world_prod_info.consumed
+                - world_prod_info.produced,
             )
 
     # Populate graph edges
@@ -257,9 +262,11 @@ async def balance_routes_for_one_resource(
         # pprint(req)
         if not dry_run:
             try:
-                await context.client.set_trade_route(req)
+                res = await context.client.set_trade_route(req)
             except asyncio.exceptions.TimeoutError:
                 requests.append(req)
+            else:
+                context.register_response(res)
 
 
 def bootstrap_graph_edges(
@@ -500,9 +507,10 @@ def adjust_graph_edges(
         (
             importer
             for importer_id, importer in importers.items()
-            if importer.actual_import_qty == 0
+            if (importer.stockpile_consumed_qty + importer.actual_import_qty)
+            < importer.required_import_qty
             and importer.required_import_qty != 0
-            and all(importer_id != pair.dst for pair in ret.keys())
+            # and all(importer_id != pair.dst for pair in ret.keys())
         ),
         key=lambda imp: imp.required_import_qty,
     )
@@ -519,22 +527,24 @@ def adjust_graph_edges(
             surplusiest_exporter_id,
         ) = maybe_nearby_exporter
 
-        if surplusiest_exporter_surplus > importer.required_import_qty > 0:
+        amount_to_import = importer.required_import_qty - importer.actual_import_qty
+
+        if surplusiest_exporter_surplus > amount_to_import > 0:
             logger.info(
-                f"connecting previously unconnected {importer_id=} to import {importer.required_import_qty} from exporter id {surplusiest_exporter_id}"
+                f"connecting previously unconnected {importer_id=} to import {amount_to_import} from exporter id {surplusiest_exporter_id}"
             )
             ret[PlanetPair(surplusiest_exporter_id, importer_id)] = ResourceGraphEdge(
-                surplusiest_exporter_id, importer_id, importer.required_import_qty
+                surplusiest_exporter_id, importer_id, amount_to_import
             )
 
             exporters[surplusiest_exporter_id] = replace(
                 (old_exporter_val := exporters[surplusiest_exporter_id]),
                 desired_export_qty=old_exporter_val.desired_export_qty
-                + importer.required_import_qty,
+                + amount_to_import,
             )
             importers[importer_id] = replace(
                 importer,
-                actual_import_qty=importer.required_import_qty,
+                actual_import_qty=importer.actual_import_qty + amount_to_import,
             )
 
     return ret
