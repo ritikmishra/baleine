@@ -82,8 +82,6 @@ async def main() -> None:
         # logger.info(f"The best foundation world ids are")
         # pprint(find_best_foundation_world(context))
 
-        # await cluster_building.decentralized_trade_route_manager(context, clean_slate=False, throttle=3, dry_run=False, filter=filters.dist_filter(context, "tears", 250))
-
         # await scout_around_planet(context,
         #                           center_world_id=(await find_next_sector_capital_worlds(context))[0].id,
         #                           radius=250,
