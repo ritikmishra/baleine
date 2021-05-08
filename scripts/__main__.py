@@ -1,16 +1,22 @@
 import asyncio
+from asyncio.tasks import Task
 import logging
+from pprint import pprint
 from scripts.tasks.garbage_collect_trade_routes import garbage_collect_trade_routes
 from scripts.tasks.balance_trade_routes import balance_trade_routes
-from typing import Awaitable, List
+from typing import Any, Awaitable, List
 
 from anacreonlib.types.request_datatypes import AnacreonApiRequest
-from rx.operators import first
+from rx.operators import first, take
 
 from scripts import utils, filters
 from scripts.context import AnacreonContext
 from scripts.tasks import conquest_tasks, cluster_building
-from scripts.tasks.cluster_building import calculate_resource_deficit
+from scripts.tasks.cluster_building import (
+    calculate_resource_deficit,
+    connect_worlds_to_fnd,
+    find_best_foundation_world,
+)
 from scripts.tasks.improvement_related_tasks import build_habitats_spaceports
 from scripts.tasks.simple_tasks import dump_state_to_json
 from scripts.utils import TermColors
@@ -30,8 +36,8 @@ logging.basicConfig(
 
 async def main() -> None:
     logger = logging.getLogger("main")
-    futures: List[Awaitable] = []
-    daemon_tasks: list = []
+    futures: List[Awaitable[None]] = []
+    daemon_tasks: List[Task[None]] = []
 
     context = await AnacreonContext.create(AnacreonApiRequest(**auth))
     try:
@@ -39,6 +45,7 @@ async def main() -> None:
         async def on_every_watch() -> None:
             """builds spaceports and designates low tl worlds on every watch"""
             while True:
+                # wait 1 min for next watch update
                 await context.watch_update_observable.pipe(first())
                 await asyncio.gather(
                     build_habitats_spaceports(context),
@@ -48,20 +55,32 @@ async def main() -> None:
         async def every_hour() -> None:
             """garbage collect trade routes every hour"""
             while True:
-                await context.watch_update_observable.pipe(first())
+                # wait for 60 mins to pass
+                await context.watch_update_observable.pipe(take(60))
                 await asyncio.gather(garbage_collect_trade_routes(context))
 
+        async def every_40_mins() -> None:
+            while True:
+                await context.watch_update_observable.pipe(take(40))
+                await balance_trade_routes(context)
+
         daemon_tasks.append(asyncio.create_task(on_every_watch()))
-        # daemon_tasks.append(asyncio.create_task(every_hour()))
+        daemon_tasks.append(asyncio.create_task(every_hour()))
+        daemon_tasks.append(asyncio.create_task(every_40_mins()))
         daemon_tasks.append(asyncio.create_task(context.periodically_update_objects()))
 
         logger.info("Waiting to get objects")
         full_state = await context.watch_update_observable.pipe(first())
         logger.info("Got objects!")
 
-        await cluster_building.calculate_resource_deficit(context, exports_only=True)
+        # await cluster_building.calculate_resource_deficit(context, exports_only=True)
 
+        # balance trade routes
         await balance_trade_routes(context)
+
+        ## Find a new foundation world
+        # logger.info(f"The best foundation world ids are")
+        # pprint(find_best_foundation_world(context))
 
         # await cluster_building.decentralized_trade_route_manager(context, clean_slate=False, throttle=3, dry_run=False, filter=filters.dist_filter(context, "tears", 250))
 
@@ -77,7 +96,9 @@ async def main() -> None:
         #                                                               {"BR 1405 (hex)", "Lesser Nishapur (hex)"})))
 
         ## Connect worlds to a foundation
-        # await connect_worlds_to_fnd(context, 4216)
+        # await connect_worlds_to_fnd(context, 3085)
+
+        # futures.append(asyncio.create_task(asyncio.sleep(8 * 3600)))
 
         ## Attack worlds around center world
         # futures.append(asyncio.create_task(

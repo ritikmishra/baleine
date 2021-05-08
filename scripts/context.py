@@ -267,7 +267,7 @@ class AnacreonContext:
                 elif item.category == Category.GROUND_UNIT:
                     self.gf_calc[item.id] = attack_value
 
-    def get_forces(self, resources: List[float]) -> MilitaryForces:
+    def get_forces(self, resources: Sequence[float]) -> MilitaryForces:
         """
         Calculate the space and ground force of something
 
