@@ -1,3 +1,5 @@
+import pathlib
+from contextlib import suppress
 import asyncio
 import functools
 import json
@@ -139,6 +141,14 @@ async def graph_exploration_boundary(context: AnacreonContext) -> None:
         logger.info("Saved graph file! " + filename)
 
 
+def _ensure_filename_exists(filename: str) -> None:
+    filepath = pathlib.Path(filename)
+    with suppress(FileExistsError):
+        filepath.mkdir(parents=True, exist_ok=True)
+        filepath.rmdir()
+        filepath.touch(exist_ok=True)
+
+
 def dump_state_to_json(
     context: AnacreonContext,
     state_subset: Optional[List[AnacreonObject]] = None,
@@ -159,6 +169,9 @@ def dump_state_to_json(
             all_raw_objects.append(obj)
         else:
             all_raw_objects.append(obj.dict(by_alias=True))
+
+    _ensure_filename_exists(filename)
+
     with open(filename, "w") as f:
         json.dump(all_raw_objects, f, indent=4)
 
@@ -175,6 +188,8 @@ async def dump_scn_to_json(
         context.base_request.auth_token, context.base_request.game_id
     )
     logger.info("retrieved scnn info!")
+
+    _ensure_filename_exists(filename)
 
     with open(filename, "w") as f:
         json.dump(scn_info, f, indent=4)
