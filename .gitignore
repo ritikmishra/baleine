@@ -5,3 +5,7 @@ __pycache__/
 *.pyc
 .mypy_cache/
 out/
+
+# contains absolute path to my specific virtual env which lives in my home folder
+# commiting that path would not be nice to people trying to clone this project
+.vscode/settings.json
