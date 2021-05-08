@@ -6,8 +6,16 @@ from typing import List, Callable, Dict, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-from anacreonlib.types.request_datatypes import SetFleetDestinationRequest, DeployFleetRequest
-from anacreonlib.types.response_datatypes import Fleet, ReigningSovereign, World, AnacreonObject
+from anacreonlib.types.request_datatypes import (
+    SetFleetDestinationRequest,
+    DeployFleetRequest,
+)
+from anacreonlib.types.response_datatypes import (
+    Fleet,
+    ReigningSovereign,
+    World,
+    AnacreonObject,
+)
 from anacreonlib.types.type_hints import Location
 from rx.operators import first
 
@@ -16,16 +24,30 @@ from scripts.creds import SOV_ID
 from scripts.utils import flat_list_to_tuples, dist, dict_to_flat_list
 
 
-def _exploration_outline_to_points(outline) -> List[Location]:
+def _exploration_outline_to_points(outline: List[List[float]]) -> List[Location]:
+    """Turn an outline from the API into a list of points representhing the boundary
+
+    Args:
+        outline (List[List[float]]): List of contours returned by the api. Each inner
+        list constitutes a contour. Inner lists are of the form [x1, y1, x2, y2, ...]
+        where the points (x1, y1), (x2, y2), etc are points on the boundary of the contour
+
+    Returns:
+        List[Location]: [description]
+    """
     flattened = []
     for contour in outline:
         flattened.extend(contour)
     return flat_list_to_tuples(flattened)
 
 
-async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str):
-    def find_fleet(objects):
-        return next(obj for obj in objects if isinstance(obj, Fleet) and obj.name.strip() == fleet_name)
+async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str) -> None:
+    def find_fleet(objects: List[AnacreonObject]) -> Fleet:
+        return next(
+            obj
+            for obj in objects
+            if isinstance(obj, Fleet) and obj.name.strip() == fleet_name
+        )
 
     logger = logging.getLogger(fleet_name)
 
@@ -34,20 +56,33 @@ async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str):
     number_of_visits_to_ban_candidate = 0
 
     while True:
-        our_sovereign: ReigningSovereign = next(obj for obj in context.state
-                                                if isinstance(obj, ReigningSovereign)
-                                                and obj.id == SOV_ID)
+        our_sovereign: ReigningSovereign = next(
+            obj
+            for obj in context.state
+            if isinstance(obj, ReigningSovereign) and obj.id == SOV_ID
+        )
 
         current_fleet: Fleet = find_fleet(context.state)
         current_fleet_pos = current_fleet.position
         logger.info(f"Fleet currently at {current_fleet_pos}")
 
-        our_border = _exploration_outline_to_points(our_sovereign.exploration_grid.explored_outline)
+        assert our_sovereign.exploration_grid is not None
+        our_border = _exploration_outline_to_points(
+            our_sovereign.exploration_grid.explored_outline
+        )
 
-        nearest_border_point: Location = min(our_border, key=functools.partial(dist, current_fleet_pos))
+        nearest_border_point: Location = min(
+            our_border, key=functools.partial(dist, current_fleet_pos)
+        )
 
-        worlds = iter(obj for obj in context.state if isinstance(obj, World) and obj.id not in banned_world_ids)
-        nearest_planet_to_target: World = min(worlds, key=lambda w: dist(nearest_border_point, w.pos))
+        worlds = iter(
+            obj
+            for obj in context.state
+            if isinstance(obj, World) and obj.id not in banned_world_ids
+        )
+        nearest_planet_to_target: World = min(
+            worlds, key=lambda w: dist(nearest_border_point, w.pos)
+        )
 
         if ban_candidate != nearest_planet_to_target.id:
             ban_candidate = nearest_planet_to_target.id
@@ -62,7 +97,11 @@ async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str):
 
         # send the fleet + refresh data
         new_resp = await context.client.set_fleet_destination(
-            SetFleetDestinationRequest(obj_id=current_fleet.id, dest=nearest_planet_to_target.id, **context.auth)
+            SetFleetDestinationRequest(
+                obj_id=current_fleet.id,
+                dest=nearest_planet_to_target.id,
+                **context.auth,
+            )
         )
         context.register_response(new_resp)
         banned_world_ids.add(nearest_planet_to_target.id)
@@ -72,12 +111,23 @@ async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str):
         logger.info(f"New watch, lets see what happened")
 
 
-async def graph_exploration_boundary(context: AnacreonContext):
+async def graph_exploration_boundary(context: AnacreonContext) -> None:
     logger = logging.getLogger("exploration boundary grapher")
-    our_sovereign = next(obj for obj in context.state if isinstance(obj, ReigningSovereign) and obj.id == SOV_ID)
+    our_sovereign = next(
+        obj
+        for obj in context.state
+        if isinstance(obj, ReigningSovereign) and obj.id == SOV_ID
+    )
+
+    assert our_sovereign.exploration_grid is not None
     outline_list_of_pts = sorted(
-        (flat_list_to_tuples(contour) for contour in our_sovereign.exploration_grid.explored_outline), key=len,
-        reverse=True)
+        (
+            flat_list_to_tuples(contour)
+            for contour in our_sovereign.exploration_grid.explored_outline
+        ),
+        key=len,
+        reverse=True,
+    )
 
     for contour in outline_list_of_pts:
         outline_points = np.array(contour)
@@ -89,7 +139,11 @@ async def graph_exploration_boundary(context: AnacreonContext):
         logger.info("Saved graph file! " + filename)
 
 
-def dump_state_to_json(context: AnacreonContext, state_subset: Optional[List[AnacreonObject]]=None, filename="objects.json"):
+def dump_state_to_json(
+    context: AnacreonContext,
+    state_subset: Optional[List[AnacreonObject]] = None,
+    filename: str = "out/objects.json",
+) -> None:
     logger = logging.getLogger("dump context state")
 
     if state_subset is None:
@@ -111,11 +165,15 @@ def dump_state_to_json(context: AnacreonContext, state_subset: Optional[List[Ana
     logger.info("state dump complete!")
 
 
-async def dump_scn_to_json(context: AnacreonContext, filename="scn_info.json"):
+async def dump_scn_to_json(
+    context: AnacreonContext, filename: str = "out/scn_info.json"
+) -> None:
     logger = logging.getLogger("dump scn info")
 
     logger.info("getting scenario info")
-    scn_info = await context.client.get_game_info(context.base_request.auth_token, context.base_request.game_id)
+    scn_info = await context.client.get_game_info(
+        context.base_request.auth_token, context.base_request.game_id
+    )
     logger.info("retrieved scnn info!")
 
     with open(filename, "w") as f:
@@ -123,30 +181,62 @@ async def dump_scn_to_json(context: AnacreonContext, filename="scn_info.json"):
     logger.info("saved it to disk!")
 
 
-async def send_fleet_to_worlds_meeting_predicate(context: AnacreonContext, source_obj_id: int,
-                                                 resources: Dict[int, int], predicate: Callable[[World], bool], *,
-                                                 logger=None):
+async def send_fleet_to_worlds_meeting_predicate(
+    context: AnacreonContext,
+    source_obj_id: int,
+    resources: Dict[int, int],
+    predicate: Callable[[World], bool],
+    *,
+    logger: Optional[logging.Logger] = None,
+) -> None:
     if logger is None:
         logger = logging.getLogger("send fleet to worlds meeting predicate")
 
-    worlds_to_send_fleet_to = [world for world in context.state if isinstance(world, World) and predicate(world)]
+    worlds_to_send_fleet_to = [
+        world
+        for world in context.state
+        if isinstance(world, World) and predicate(world)
+    ]
     for world in worlds_to_send_fleet_to:
         partial_state = await context.client.deploy_fleet(
-            DeployFleetRequest(source_obj_id=source_obj_id, resources=dict_to_flat_list(resources), **context.base_request.dict(by_alias=True)))
+            DeployFleetRequest(
+                source_obj_id=source_obj_id,
+                resources=dict_to_flat_list(resources),
+                **context.base_request.dict(by_alias=True),
+            )
+        )
 
-        newest_fleet = max((fleet for fleet in partial_state if isinstance(fleet, Fleet)), key=lambda f: f.id)
-        logger.info(f"Deployed fleet (name = '{newest_fleet.name}') (id = '{newest_fleet.id}')!")
+        newest_fleet = max(
+            (fleet for fleet in partial_state if isinstance(fleet, Fleet)),
+            key=lambda f: f.id,
+        )
+        logger.info(
+            f"Deployed fleet (name = '{newest_fleet.name}') (id = '{newest_fleet.id}')!"
+        )
         context.register_response(partial_state)
 
         partial_state = await context.client.set_fleet_destination(
-            SetFleetDestinationRequest(obj_id=newest_fleet.id, dest=world.id, **context.base_request.dict(by_alias=True)))
-        logger.info(f"Sent fleet id {newest_fleet.id} to planet (name = '{world.name}') (id = '{world.id}')")
+            SetFleetDestinationRequest(
+                obj_id=newest_fleet.id,
+                dest=world.id,
+                **context.base_request.dict(by_alias=True),
+            )
+        )
+        logger.info(
+            f"Sent fleet id {newest_fleet.id} to planet (name = '{world.name}') (id = '{world.id}')"
+        )
         context.register_response(partial_state)
         await asyncio.sleep(3)
 
 
-async def scout_around_planet(context: AnacreonContext, center_world_id: int, radius=200, *, resource_dict=None,
-                              source_obj_id=None):
+async def scout_around_planet(
+    context: AnacreonContext,
+    center_world_id: int,
+    radius: float = 200,
+    *,
+    resource_dict: Optional[Dict[int, int]] = None,
+    source_obj_id: Optional[int] = None,
+) -> None:
     """
     Sends fleets to all planens within a radius of the center planet
 
@@ -164,10 +254,15 @@ async def scout_around_planet(context: AnacreonContext, center_world_id: int, ra
     if source_obj_id is None:
         source_obj_id = center_world_id
 
-    center_world = next(world for world in context.state if isinstance(world, World) and world.id == center_world_id)
+    center_world = next(
+        world
+        for world in context.state
+        if isinstance(world, World) and world.id == center_world_id
+    )
 
     def is_world_in_radius(world: World) -> bool:
         return dist(world.pos, center_world.pos) < radius
 
-    await send_fleet_to_worlds_meeting_predicate(context, source_obj_id, resource_dict, is_world_in_radius,
-                                                 logger=logger)
+    await send_fleet_to_worlds_meeting_predicate(
+        context, source_obj_id, resource_dict, is_world_in_radius, logger=logger
+    )

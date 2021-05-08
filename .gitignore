@@ -4,3 +4,4 @@ creds.py
 __pycache__/
 *.pyc
 .mypy_cache/
+out/
