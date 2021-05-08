@@ -1,29 +1,44 @@
 import asyncio
 import collections
 import logging
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, NamedTuple
 
-from anacreonlib.types.request_datatypes import SetFleetDestinationRequest, BattlePlan, AttackRequest
+from anacreonlib.types.request_datatypes import (
+    SetFleetDestinationRequest,
+    BattlePlan,
+    AttackRequest,
+)
 from anacreonlib.types.response_datatypes import Fleet, World
 from anacreonlib.types.type_hints import BattleObjective
 from rx.operators import first
 
 from scripts.context import AnacreonContext
 
-OrderedPlanetId = collections.namedtuple("OrderedPlanetId", ["order", "id"])
-"""Allows for putting planet IDs into a PriorityQueue or similar construct"""
+
+class OrderedPlanetId(NamedTuple):
+    """Allows for putting planet IDs into a PriorityQueue or similar construct"""
+
+    order: int
+    id: int
 
 
 def find_fleet(fleet_id: int, *, state=None, context=None):
-    return next(fleet for fleet in (state or context.state)
-                if isinstance(fleet, Fleet) and fleet.id == fleet_id)
+    return next(
+        fleet
+        for fleet in (state or context.state)
+        if isinstance(fleet, Fleet) and fleet.id == fleet_id
+    )
 
 
-async def fleet_walk(context: AnacreonContext, fleet_id: int, *,
-                     input_queue: asyncio.Queue,
-                     output_queue: Optional[asyncio.Queue] = None,
-                     input_queue_is_live: bool = False,
-                     logger_name: Optional[str] = None) -> AsyncGenerator[World, Optional[int]]:
+async def fleet_walk(
+    context: AnacreonContext,
+    fleet_id: int,
+    *,
+    input_queue: "asyncio.Queue[OrderedPlanetId]",
+    output_queue: "Optional[asyncio.Queue[OrderedPlanetId]]" = None,
+    input_queue_is_live: bool = False,
+    logger_name: Optional[str] = None,
+) -> AsyncGenerator[World, Optional[int]]:
     logger = logging.getLogger(logger_name or f"(fleet id {fleet_id}")
 
     # def _find_this_fleet(state=None):
@@ -46,9 +61,7 @@ async def fleet_walk(context: AnacreonContext, fleet_id: int, *,
 
         # Step 2a: Send the fleet to go there
         destination_request = SetFleetDestinationRequest(
-            obj_id=fleet_id,
-            dest=planet_id,
-            **context.base_request.dict(by_alias=False)
+            obj_id=fleet_id, dest=planet_id, **context.base_request.dict(by_alias=False)
         )
 
         logger.debug("-- DESTINATION REQUEST JSON --")
@@ -75,7 +88,10 @@ async def fleet_walk(context: AnacreonContext, fleet_id: int, *,
 
         # Step 4: Give our caller the world object and wait for them to send us back the ranking order
         output_queue_ranking = yield next(
-            world for world in context.state if isinstance(world, World) and world.id == planet_id)
+            world
+            for world in context.state
+            if isinstance(world, World) and world.id == planet_id
+        )
 
         # Step 5: Our caller has sent us back if it succeeded or not
         input_queue.task_done()
@@ -89,25 +105,41 @@ async def fleet_walk(context: AnacreonContext, fleet_id: int, *,
         yield
 
 
-async def attack_fleet_walk(context: AnacreonContext, fleet_id: int, *,
-                            objective: BattleObjective,
-                            input_queue: asyncio.Queue,
-                            output_queue: Optional[asyncio.Queue] = None,
-                            input_queue_is_live: bool = False,
-                            logger_name: Optional[str] = None):
+async def attack_fleet_walk(
+    context: AnacreonContext,
+    fleet_id: int,
+    *,
+    objective: BattleObjective,
+    input_queue: "asyncio.Queue[OrderedPlanetId]",
+    output_queue: "Optional[asyncio.Queue[OrderedPlanetId]]" = None,
+    input_queue_is_live: bool = False,
+    logger_name: Optional[str] = None,
+):
 
     logger = logging.getLogger(logger_name)
-    fleet_walk_gen = fleet_walk(context, fleet_id, input_queue=input_queue, output_queue=output_queue,
-                                input_queue_is_live=input_queue_is_live, logger_name=logger_name)
+    fleet_walk_gen = fleet_walk(
+        context,
+        fleet_id,
+        input_queue=input_queue,
+        output_queue=output_queue,
+        input_queue_is_live=input_queue_is_live,
+        logger_name=logger_name,
+    )
 
     async for world_to_attack in fleet_walk_gen:
         # Step 3: attack! AAAAAAAAAAAaaAAaaaaa
         planet_id = world_to_attack.id
-        plan = BattlePlan(battlefield_id=planet_id, enemy_sovereign_ids=[world_to_attack.sovereign_id],
-                          objective=objective)
+        plan = BattlePlan(
+            battlefield_id=planet_id,
+            enemy_sovereign_ids=[world_to_attack.sovereign_id],
+            objective=objective,
+        )
 
-        attack_req = AttackRequest(attacker_obj_id=planet_id, battle_plan=plan,
-                                   **context.base_request.dict(by_alias=False))
+        attack_req = AttackRequest(
+            attacker_obj_id=planet_id,
+            battle_plan=plan,
+            **context.base_request.dict(by_alias=False),
+        )
         partial_state = await context.client.attack(attack_req)
         context.register_response(partial_state)
 
@@ -126,7 +158,11 @@ async def attack_fleet_walk(context: AnacreonContext, fleet_id: int, *,
                 break
             logger.info(f"objective {str(objective)} on {planet_id} is in progress")
 
-        world = next(world for world in context.state if isinstance(world, World) and world.id == planet_id)
+        world = next(
+            world
+            for world in context.state
+            if isinstance(world, World) and world.id == planet_id
+        )
 
         # the client should send us
         output_queue_power = yield world
