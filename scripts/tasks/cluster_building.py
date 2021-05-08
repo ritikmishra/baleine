@@ -1,25 +1,33 @@
 import asyncio
 import collections
 import dataclasses
-import functools
 import itertools
 import logging
 from collections import OrderedDict
+from math import fabs
 from typing import Optional, List, Dict, Set, Callable, Tuple
 
 from anacreonlib.exceptions import HexArcException
-from anacreonlib.types.request_datatypes import DesignateWorldRequest, RenameObjectRequest, SetTradeRouteRequest, \
-    TradeRouteTypes, StopTradeRouteRequest
+from anacreonlib.types.request_datatypes import (
+    DesignateWorldRequest,
+    RenameObjectRequest,
+    SetTradeRouteRequest,
+    TradeRouteTypes,
+    StopTradeRouteRequest,
+)
 from anacreonlib.types.response_datatypes import World, Trait, OwnedWorld, TradeRoute
-from anacreonlib.types.scenario_info_datatypes import Category
+from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfoElement
 from anacreonlib.types.type_hints import TechLevel, Location
+from rx.operators import first
 
 from scripts import utils
 from scripts.context import AnacreonContext, ProductionInfo
 from scripts.utils import TermColors
 
 
-def get_free_work_units(world: World, tech_level: TechLevel = 7, efficiency: float = .9):
+def get_free_work_units(
+    world: World, tech_level: TechLevel = 7, efficiency: float = 0.9
+) -> float:
     """
     Calculates the equilibrium number of work units that the world should have
 
@@ -28,7 +36,7 @@ def get_free_work_units(world: World, tech_level: TechLevel = 7, efficiency: flo
     :param efficiency: the equilibrium efficiency to assume
     :return: the total amount of work units this planet will have in the long run, excluding work units decicated to survival structures
     """
-    total_wu = 0
+    total_wu = 0.0
     for trait in world.traits:
         if isinstance(trait, Trait):
             total_wu += trait.work_units
@@ -48,7 +56,7 @@ food_consumption_per_million_pop = {
     7: 1.199,
     8: 1.6181,
     9: 2.1846,
-    10: 2.9491
+    10: 2.9491,
 }
 
 durable_goods_consumption_per_million_pop = {
@@ -61,7 +69,7 @@ durable_goods_consumption_per_million_pop = {
     7: 0.6754,
     8: 1.0813000000000001,
     9: 1.7303000000000002,
-    10: 2.7687
+    10: 2.7687,
 }
 
 luxury_consumption_per_million_pop = {
@@ -74,7 +82,7 @@ luxury_consumption_per_million_pop = {
     7: 0.0143,
     8: 0.041800000000000004,
     9: 0.12430000000000001,
-    10: 0.3718000000000001
+    10: 0.3718000000000001,
 }
 
 abundant_resource_to_desig_id_map = {
@@ -85,22 +93,80 @@ abundant_resource_to_desig_id_map = {
     261: 263,  # trillum
 }
 
-TL_8_WORLD_CLASSES = {92, 271, 113}  # ocean, earth-like, underground planets can build planetary arcologies
+TL_8_WORLD_CLASSES = {
+    92,
+    271,
+    113,
+}  # ocean, earth-like, underground planets can build planetary arcologies
 
 
-def get_preferred_resource_desig(context: AnacreonContext, world: World) -> Optional[int]:
+def get_preferred_resource_desig(
+    context: AnacreonContext, world: World
+) -> Optional[int]:
     """
     If this planet is abundant in any resources, recommend that it is designated as a
     resource extractor for that resource
     :return: None if planet is not abundant in any resources, or the preferred desig id if it is.
     """
-    return next((extractor_desig_id
-                 for abundant_trait_id, extractor_desig_id in abundant_resource_to_desig_id_map.items()
-                 if utils.world_has_trait(context.game_info.scenario_info, world, abundant_trait_id)),
-                None)
+    return next(
+        (
+            extractor_desig_id
+            for abundant_trait_id, extractor_desig_id in abundant_resource_to_desig_id_map.items()
+            if utils.world_has_trait(
+                context.game_info.scenario_info, world, abundant_trait_id
+            )
+        ),
+        None,
+    )
 
 
-async def designate_low_tl_worlds(context: AnacreonContext):
+def find_best_foundation_world(context: AnacreonContext) -> List[Tuple[int, int]]:
+    """
+    Find the world which is in trading distance range to the highest number of our planets
+
+    returns list of (world_id, neighbor_world_count tuples)
+    """
+    university_designation = next(
+        x
+        for x in context.scenario_info_objects.values()
+        if x.unid == "core.universityDesignation"
+    )
+
+    our_worlds = {
+        world.id: world for world in context.state if isinstance(world, OwnedWorld)
+    }
+
+    fnd_worlds = {
+        world_id: world
+        for world_id, world in our_worlds.items()
+        if world.designation == university_designation.id
+    }
+
+    def not_near_existing_fnd(world: OwnedWorld) -> bool:
+        return all(utils.dist(world.pos, fnd.pos) > 200 for fnd in fnd_worlds.values())
+
+    unconnected_worlds = {
+        world_id: world
+        for world_id, world in our_worlds.items()
+        if not_near_existing_fnd(world)
+    }
+
+    def count_nearby_worlds(world: OwnedWorld) -> int:
+        count = 0
+        for other_id, other in unconnected_worlds.items():
+            if world.id != other_id and utils.dist(other.pos, world.pos) < 200:
+                count += 1
+
+        return count
+
+    world_counts = {
+        world_id: count_nearby_worlds(world) for world_id, world in our_worlds.items()
+    }
+
+    return sorted(world_counts.items(), key=lambda wc: wc[1], reverse=True)
+
+
+async def designate_low_tl_worlds(context: AnacreonContext) -> None:
     """
     Goes through all of our worlds and designates them if they are undesignated and low tech level
     :param context:
@@ -108,73 +174,112 @@ async def designate_low_tl_worlds(context: AnacreonContext):
     """
     logger = logging.getLogger("Designate low TL worlds")
 
-    autonomous_desig_id: int = context.get_scn_info_el_unid("core.autonomousDesignation").id
-    cgaf_desig_id: int = context.get_scn_info_el_unid("core.consumerGoodsDesignation").id
+    autonomous_desig_id: int = context.get_scn_info_el_unid(
+        "core.autonomousDesignation"
+    ).id
+    cgaf_desig_id: int = context.get_scn_info_el_unid(
+        "core.consumerGoodsDesignation"
+    ).id
 
-    worlds_to_designate: List[OwnedWorld] = [world for world in context.state
-                                             if isinstance(world, OwnedWorld)
-                                             and world.tech_level < 5
-                                             and world.designation == autonomous_desig_id]
+    worlds_to_designate: List[OwnedWorld] = [
+        world
+        for world in context.state
+        if isinstance(world, OwnedWorld)
+        and world.tech_level < 5
+        and world.designation == autonomous_desig_id
+    ]
 
     for world in worlds_to_designate:
         preferred_desig = get_preferred_resource_desig(context, world) or cgaf_desig_id
-        if (context.scenario_info_objects[preferred_desig].min_tech_level or 10) > world.tech_level:
+        if (
+            context.scenario_info_objects[preferred_desig].min_tech_level or 10
+        ) > world.tech_level:
             preferred_desig = cgaf_desig_id
         try:
-            logger.info(f"going to designate {world.name} (id {world.id}) as desig id {preferred_desig}")
-            partial_state = await context.client.designate_world(DesignateWorldRequest(
-                source_obj_id=world.id,
-                new_designation=preferred_desig,
-                **context.auth
-            ))
+            logger.info(
+                f"going to designate {world.name} (id {world.id}) as desig id {preferred_desig}"
+            )
+            partial_state = await context.client.designate_world(
+                DesignateWorldRequest(
+                    source_obj_id=world.id,
+                    new_designation=preferred_desig,
+                    **context.auth,
+                )
+            )
             context.register_response(partial_state)
         except HexArcException as e:
-            logger.error(f"Encountered exception trying to designate world name `{world.name}` id {world.id}")
+            logger.error(
+                f"Encountered exception trying to designate world name `{world.name}` id {world.id}"
+            )
             logger.error(e)
 
 
-async def build_cluster(context: AnacreonContext, center_world_id: int, radius: float = 200):
+async def build_cluster(
+    context: AnacreonContext, center_world_id: int, radius: float = 200
+):
     logger = logging.getLogger("cluster builder")
 
     worlds = [world for world in context.state if isinstance(world, World)]
     center_world = next(world for world in worlds if world.id == center_world_id)
-    worlds_in_cluster = [world
-                         for world in worlds
-                         if (world.sovereign_id == int(context.base_request.sovereign_id)
-                             and utils.dist(world.pos, center_world.pos) <= radius)]
+    worlds_in_cluster = [
+        world
+        for world in worlds
+        if (
+            world.sovereign_id == int(context.base_request.sovereign_id)
+            and utils.dist(world.pos, center_world.pos) <= radius
+        )
+    ]
 
     logger.info(
-        f"There are {len(worlds_in_cluster)} worlds in the cluster surrounding {center_world.name} (id {center_world.id})")
+        f"There are {len(worlds_in_cluster)} worlds in the cluster surrounding {center_world.name} (id {center_world.id})"
+    )
 
     for world in worlds_in_cluster:
         extractor_desig_id = get_preferred_resource_desig(context, world)
         if extractor_desig_id is not None and world.designation != extractor_desig_id:
             try:
-                req = DesignateWorldRequest(source_obj_id=world.id, new_designation=extractor_desig_id,
-                                            **context.auth)
+                req = DesignateWorldRequest(
+                    source_obj_id=world.id,
+                    new_designation=extractor_desig_id,
+                    **context.auth,
+                )
                 partial_state = await context.client.designate_world(req)
-                logger.info(f"Designated {world.name} (id {world.id}) as resource extractor")
+                logger.info(
+                    f"Designated {world.name} (id {world.id}) as resource extractor"
+                )
             except HexArcException:
-                req = RenameObjectRequest(obj_id=world.id,
-                                          name=f"{world.id} future extractor {extractor_desig_id}",
-                                          **context.auth)
+                req = RenameObjectRequest(
+                    obj_id=world.id,
+                    name=f"{world.id} future extractor {extractor_desig_id}",
+                    **context.auth,
+                )
                 partial_state = await context.client.rename_object(req)
-                logger.info(f"Marked {world.name} (id {world.id}) as resource extractor")
+                logger.info(
+                    f"Marked {world.name} (id {world.id}) as resource extractor"
+                )
             context.register_response(partial_state or [])
 
 
-async def connect_worlds_to_fnd(context: AnacreonContext, fnd_id: int, worlds: Optional[List[World]] = None):
+async def connect_worlds_to_fnd(
+    context: AnacreonContext, fnd_id: int, worlds: Optional[List[World]] = None
+):
     logger = logging.getLogger(f"connect foundation id {fnd_id}")
 
-    fnd_world = next(world for world in context.state if isinstance(world, World) and world.id == fnd_id)
+    fnd_world = next(
+        world
+        for world in context.state
+        if isinstance(world, OwnedWorld) and world.id == fnd_id
+    )
     if worlds is None:
-        worlds = [world for world in context.state
-                  if isinstance(world, World)
-                  and utils.dist(world.pos, fnd_world.pos) <= 200
-                  and world.sovereign_id == int(context.base_request.sovereign_id)
-                  and world.id != fnd_id
-                  and world.tech_level <= 7
-                  and fnd_id not in world.trade_route_partners]
+        worlds = [
+            world
+            for world in context.state
+            if isinstance(world, OwnedWorld)
+            and utils.dist(world.pos, fnd_world.pos) <= 200
+            and world.id != fnd_id
+            and world.tech_level <= 7
+            and fnd_id not in (world.trade_route_partners or {})
+        ]
 
     if len(worlds) == 0:
         logger.info("Cannot connect new worlds to foundation")
@@ -186,8 +291,13 @@ async def connect_worlds_to_fnd(context: AnacreonContext, fnd_id: int, worlds: O
             for tl_8_class in TL_8_WORLD_CLASSES
         )
         tech_level = 8 if planet_can_build_planetary_arcology else 7
-        req = SetTradeRouteRequest(importer_id=world.id, exporter_id=fnd_id, alloc_type=TradeRouteTypes.TECH,
-                                   alloc_value=str(tech_level), **context.auth)
+        req = SetTradeRouteRequest(
+            importer_id=world.id,
+            exporter_id=fnd_id,
+            alloc_type=TradeRouteTypes.TECH,
+            alloc_value=str(tech_level),
+            **context.auth,
+        )
         logger.info(f"Importing TL {tech_level} to world {world.name} (id {world.id})")
         print(req.json(by_alias=True))
         partial_state = await context.client.set_trade_route(req)
@@ -209,83 +319,177 @@ class WorldIdLocationPair:
 class NeedsProvidesInfo:
     """
     Contains information on what a class needs to import, and can provide to other worlds
-    dicts are maps between
+    dicts are maps between resource ID and quantity
     """
-    needs: Dict[int, float] = dataclasses.field(default_factory=dict)
-    provides: Dict[int, float] = dataclasses.field(default_factory=dict)
+
+    needs: Dict[int, float] = dataclasses.field(
+        default_factory=lambda: collections.defaultdict(lambda: 0)
+    )
+    provides: Dict[int, float] = dataclasses.field(
+        default_factory=lambda: collections.defaultdict(lambda: 0)
+    )
 
 
-async def decentralized_trade_route_manager(context: AnacreonContext, *, dry_run: bool = False,
-                                            clean_slate: bool = False, throttle: float = 0):
+async def decentralized_trade_route_manager(
+    context: AnacreonContext,
+    *,
+    dry_run: bool = False,
+    clean_slate: bool = False,
+    throttle: float = 0,
+    filter: Callable[[OwnedWorld], bool] = (lambda w: True),
+):
     """Manage a system of decentralized trade routes"""
     logger = logging.getLogger("decentralized trade route manager")
 
-    our_worlds: Dict[int, World] = {world.id: world for world in context.state if
-                                    isinstance(world, World) and world.sovereign_id == int(
-                                        context.base_request.sovereign_id)}
+    our_worlds: Dict[int, World] = {
+        world.id: world
+        for world in context.state
+        if isinstance(world, OwnedWorld) and filter(world)
+    }
 
     logger.info(f"Altering the trade routes of {len(our_worlds)} worlds")
-    needs_provides_data: Dict[WorldIdLocationPair, NeedsProvidesInfo] = {}
+    needs_provides_data: Dict[
+        WorldIdLocationPair, NeedsProvidesInfo
+    ] = collections.defaultdict(NeedsProvidesInfo)
 
     """Tuples should have ids in sorted order"""
     cancelled_trade_routes: Dict[Tuple[int, int], StopTradeRouteRequest] = dict()
 
-    trade_routes: Dict[WorldIdLocationPair, List[SetTradeRouteRequest]] = collections.defaultdict(list)
+    fix_overdemand: List[SetTradeRouteRequest] = []
+    trade_routes: Dict[
+        WorldIdLocationPair, List[SetTradeRouteRequest]
+    ] = collections.defaultdict(list)
 
     def resource_providers_near_planet(res_id: int, world_id_pos: WorldIdLocationPair):
-        filtered_providers = OrderedDict(sorted(((k, v)
-                                                 for k, v in needs_provides_data.items()
-                                                 if res_id in v.provides.keys()
-                                                 and k != world_id_pos
-                                                 and utils.dist(world_id_pos.pos, k.pos) < 200),
-                                                key=lambda t: utils.dist(world_id_pos.pos, t[0].pos)))
+        filtered_providers = OrderedDict(
+            sorted(
+                (
+                    (k, v)
+                    for k, v in needs_provides_data.items()
+                    if res_id in v.provides.keys()
+                    and k != world_id_pos
+                    and utils.dist(world_id_pos.pos, k.pos) < 200
+                ),
+                key=lambda t: utils.dist(world_id_pos.pos, t[0].pos),
+            )
+        )
         return filtered_providers
 
-    foundation_worlds = set(world.id for world in our_worlds.values() if
-                            context.scenario_info_objects[world.designation].unid == "core.university")
+    foundation_worlds = set(
+        world.id
+        for world in our_worlds.values()
+        if context.scenario_info_objects[world.designation].unid == "core.university"
+    )
     logger.info(f"There are {len(foundation_worlds)} foundation worlds")
     # Step 1: Identify what each planet needs
     for world_id, world in our_worlds.items():
         # world_prod_data is a dict from resources to prod data.
         # we filter out things with attack value in case the planet is building GDMs/such
-        world_prod_data: Dict[int, ProductionInfo] = {res_id: prod_data
-                                                      for res_id, prod_data in
-                                                      context.generate_production_info(world).items()
-                                                      if context.scenario_info_objects[res_id].attack_value is None}
+        world_prod_data: Dict[int, ProductionInfo] = {
+            res_id: prod_data
+            for res_id, prod_data in context.generate_production_info(world).items()
+            if context.scenario_info_objects[res_id].attack_value is None
+        }
 
         world_desig = context.scenario_info_objects[world.designation]
         world_exports: Set[int] = set(world_desig.exports or [])
-        world_needs_provides = NeedsProvidesInfo()
+        world_id_loc = WorldIdLocationPair(id=world.id, pos=world.pos, name=world.name)
+        world_needs_provides = needs_provides_data[world_id_loc]
 
         assert world_desig.category == Category.DESIGNATION
 
         for res_id, prod_data in world_prod_data.items():
             if res_id in world_exports:
-                world_needs_provides.provides[res_id] = (prod_data.produced - prod_data.consumed_optimal)
+                world_needs_provides.provides[res_id] += (
+                    prod_data.produced - prod_data.consumed_optimal
+                )
                 if not clean_slate:
                     world_needs_provides.provides[res_id] -= prod_data.exported_optimal
             else:
-                world_needs_provides.needs[res_id] = prod_data.consumed_optimal
+                world_needs_provides.needs[res_id] += prod_data.consumed_optimal
                 if not clean_slate:
-                    world_needs_provides.needs[res_id] -= prod_data.imported_optimal
+                    if prod_data.imported == prod_data.imported_optimal:
+                        world_needs_provides.needs[res_id] -= prod_data.imported_optimal
+                    else:
+                        for (
+                            trade_partner_id,
+                            trade_route,
+                        ) in world.trade_route_partners.items():
+                            if trade_route.reciprocal:
+                                trade_route = our_worlds[
+                                    trade_route.partner_obj_id
+                                ].trade_route_partners[world.id]
 
-        world_id_loc = WorldIdLocationPair(id=world.id, pos=world.pos, name=world.name)
-        needs_provides_data[world_id_loc] = world_needs_provides
+                                # Resource transfer maps from resource ID to the qty this planet (world) is getting
+                                # from the trade partner
+                                resource_transfer = trade_route.exports
+                            else:
+                                resource_transfer = trade_route.imports
 
+                            if resource_transfer is not None:
+                                for (
+                                    traded_res_id,
+                                    pct_of_demand,
+                                    optimal,
+                                    actual,
+                                ) in utils.flat_list_to_n_tuples(4, resource_transfer):
+                                    if traded_res_id == res_id:
+                                        if actual is not None and actual < optimal:
+                                            # fix overdemand
+                                            logger.info(
+                                                f"Killing trade route (importer {world.name}, exporter {context.get_obj_by_id(trade_partner_id).name}, resource {res_id}) due to overdemand"
+                                            )
+                                            fix_overdemand.append(
+                                                SetTradeRouteRequest(
+                                                    importer_id=world.id,
+                                                    exporter_id=trade_partner_id,
+                                                    alloc_type=TradeRouteTypes.CONSUMPTION,
+                                                    alloc_value="0.0",
+                                                    res_type_id=res_id,
+                                                    **context.auth,
+                                                )
+                                            )
+                                            # By cancelling the trade route, we are essentially giving the resources we
+                                            # were importing back to our trade partner
+                                            needs_provides_data[
+                                                WorldIdLocationPair(
+                                                    id=trade_partner_id,
+                                                    name=context.get_obj_by_id(
+                                                        trade_partner_id
+                                                    ).name,
+                                                    pos=context.get_obj_by_id(
+                                                        trade_partner_id
+                                                    ).pos,
+                                                )
+                                            ].provides[res_id] += actual
+                                        else:
+                                            world_needs_provides.needs[
+                                                res_id
+                                            ] -= optimal
+
+        # To set up our clean slate, mark all trade routes for deletion
         if clean_slate and world.trade_route_partners is not None:
             trade_partner_id: int
             trade_route: TradeRoute
             for trade_partner_id, trade_route in world.trade_route_partners.items():
                 if trade_route.reciprocal:
-                    trade_route = our_worlds[trade_route.partner_obj_id].trade_route_partners[world.id]
-                if ((cancel_key := tuple(sorted((world_id, trade_partner_id)))) not in cancelled_trade_routes.keys()
-                        and trade_route.import_tech is None
-                        and trade_route.export_tech is None):
+                    trade_route = our_worlds[
+                        trade_route.partner_obj_id
+                    ].trade_route_partners[world.id]
+                if (
+                    (cancel_key := tuple(sorted((world_id, trade_partner_id))))
+                    not in cancelled_trade_routes.keys()
+                    and trade_route.import_tech is None
+                    and trade_route.export_tech is None
+                ):
                     logger.info(
-                        f"Cancelling a trade route between {world.name} and {our_worlds[trade_partner_id].name}")
-                    cancelled_trade_routes[cancel_key] = StopTradeRouteRequest(planet_id_a=world_id,
-                                                                               planet_id_b=trade_partner_id,
-                                                                               **context.auth)
+                        f"Cancelling a trade route between {world.name} and {our_worlds[trade_partner_id].name}"
+                    )
+                    cancelled_trade_routes[cancel_key] = StopTradeRouteRequest(
+                        planet_id_a=world_id,
+                        planet_id_b=trade_partner_id,
+                        **context.auth,
+                    )
 
     # Step 2: Figure out imports
     for world_id_pos, needs_provides in needs_provides_data.items():
@@ -296,7 +500,8 @@ async def decentralized_trade_route_manager(context: AnacreonContext, *, dry_run
             if total_needed_qty <= 0:
                 continue
             logger.info(
-                f"Planet Name {world_id_pos.name:35} (id {world_id_pos.id!s:6}) needs resource {context.get_scn_info_el_name(needed_res_id):20} qty {total_needed_qty}")
+                f"Planet Name {world_id_pos.name:35} (id {world_id_pos.id!s:6}) needs resource {context.get_scn_info_el_name(needed_res_id):20} qty {total_needed_qty}"
+            )
 
             # For each of our needs, find a nearby planet that can fulfill our needs
             res_providers = resource_providers_near_planet(needed_res_id, world_id_pos)
@@ -307,21 +512,29 @@ async def decentralized_trade_route_manager(context: AnacreonContext, *, dry_run
                 provideable_resources = provider_needs_provides.provides
                 if total_needed_qty * 0.1 <= provideable_resources[needed_res_id]:
                     # The planet can provide us with everything we need
-                    qty_to_import = min(needed_resources[needed_res_id], provideable_resources[needed_res_id])
+                    qty_to_import = min(
+                        needed_resources[needed_res_id],
+                        provideable_resources[needed_res_id],
+                    )
 
                     provideable_resources[needed_res_id] -= qty_to_import
                     needed_resources[needed_res_id] -= qty_to_import
-                    percent_qty_satisfied = str(round((qty_to_import / total_needed_qty) * 100 + 0.1, 1))
+                    percent_qty_satisfied = str(
+                        round((qty_to_import / total_needed_qty) * 100 + 0.1, 1)
+                    )
 
                     logger.info(
-                        f"\t - importing {qty_to_import!s:7} (%{percent_qty_satisfied!s:4}) from planet {provider_id_pos.name:35}")
+                        f"\t - importing {qty_to_import!s:7} (%{percent_qty_satisfied!s:4}) from planet {provider_id_pos.name:35}"
+                    )
                     trade_routes[world_id_pos].append(
-                        SetTradeRouteRequest(importer_id=world_id_pos.id,
-                                             alloc_type=TradeRouteTypes.CONSUMPTION,
-                                             exporter_id=provider_id_pos.id,
-                                             alloc_value=percent_qty_satisfied,
-                                             res_type_id=needed_res_id,
-                                             **context.auth)
+                        SetTradeRouteRequest(
+                            importer_id=world_id_pos.id,
+                            alloc_type=TradeRouteTypes.CONSUMPTION,
+                            exporter_id=provider_id_pos.id,
+                            alloc_value=percent_qty_satisfied,
+                            res_type_id=needed_res_id,
+                            **context.auth,
+                        )
                     )
 
                     if needed_resources[needed_res_id] <= 0:
@@ -335,13 +548,23 @@ async def decentralized_trade_route_manager(context: AnacreonContext, *, dry_run
             context.register_response(partial_state)
             logger.info(repr(cancel_order))
 
+    logger.info(f"Going to kill {len(fix_overdemand)} routes to fix overdemand")
+    for i, adj_order in enumerate(fix_overdemand):
+        if not dry_run:
+            partial_state = await context.client.set_trade_route(adj_order)
+            context.register_response(partial_state)
+            await asyncio.sleep(throttle)
+            logger.info(f"cancelled route {i}/{len(fix_overdemand)}")
+
     total_traderoutes_made = 0
     total_number_of_trade_routes = len(list(itertools.chain(*trade_routes.values())))
     logger.info(f"Going to make {total_number_of_trade_routes} trade routes!")
     # Step 3: import!
     for import_orders in trade_routes.values():
         for trade_route_order in import_orders:
-            logger.info(f"Created trade route {total_traderoutes_made}/{total_number_of_trade_routes}")
+            logger.info(
+                f"Created trade route {total_traderoutes_made}/{total_number_of_trade_routes}"
+            )
             if not dry_run:
                 partial_state = await context.client.set_trade_route(trade_route_order)
                 context.register_response(partial_state)
@@ -353,8 +576,12 @@ async def decentralized_trade_route_manager(context: AnacreonContext, *, dry_run
     logger.info("Complete!")
 
 
-async def calculate_resource_deficit(context: AnacreonContext, *,
-                                     predicate: Optional[Callable[[OwnedWorld], bool]] = None):
+async def calculate_resource_deficit(
+    context: AnacreonContext,
+    *,
+    exports_only: bool = True,
+    predicate: Optional[Callable[[OwnedWorld], bool]] = None,
+):
     """
     Print out aggregated resource production info across all of our worlds
 
@@ -364,29 +591,66 @@ async def calculate_resource_deficit(context: AnacreonContext, *,
     """
     logger = logging.getLogger("calculate resource deficit/surplus")
 
-    aggregate_prod_info: Dict[int, ProductionInfo] = collections.defaultdict(lambda: ProductionInfo())
+    aggregate_prod_info: Dict[int, ProductionInfo] = collections.defaultdict(
+        lambda: ProductionInfo()
+    )
+
+    if len(context.state) == 0:
+        await context.any_update_observable.pipe(first())
 
     our_worlds = [world for world in context.state if isinstance(world, OwnedWorld)]
     if predicate is not None:
         our_worlds = [world for world in context.state if predicate(world)]
 
     for world in our_worlds:
-        world_prod_info = context.generate_production_info(world)
+        exports = None
+        if exports_only:
+            world_desig: ScenarioInfoElement = context.scenario_info_objects[
+                world.designation
+            ]
+            exports = world_desig.exports
+
+        if exports_only:
+            world_prod_info = {
+                res_id: res_prod
+                for res_id, res_prod in context.generate_production_info(world).items()
+                if (exports is not None and res_id in exports)
+                or (
+                    exports is None
+                    and context.scenario_info_objects[res_id].attack_value is not None
+                )
+            }
+        else:
+            world_prod_info = context.generate_production_info(world)
+
         for res_id, res_prod_info in world_prod_info.items():
+            if res_id == 260:
+                logger.info(
+                    f"Taking trillum production on planet {world.name} (id {world.id}) into account"
+                )
+                logger.info(res_prod_info)
             aggregate_prod_info[res_id] += res_prod_info
 
     row_fstr = "{!s:40}{color}{!s:15}" + TermColors.ENDC + "{!s:15}{!s:15}"
-    logger.info(f"{TermColors.BOLD}{row_fstr.format('res_name', 'surplus', 'sustainability', 'stockpile', color=TermColors.OKGREEN)}{TermColors.ENDC}")
+    logger.info(
+        f"{TermColors.BOLD}{row_fstr.format('res_name', 'surplus', 'sustainability', 'stockpile', color=TermColors.OKGREEN)}{TermColors.ENDC}"
+    )
     for res_id, prod_info in aggregate_prod_info.items():
         res_name = context.get_scn_info_el_name(res_id)
         surplus = prod_info.produced - prod_info.consumed
-        watches_sustainable_for = str(round(prod_info.available / surplus, 1)) if surplus < 0 else "forever"
+        if exports_only:
+            surplus -= prod_info.exported
+        watches_sustainable_for = (
+            str(round(prod_info.available / surplus, 1)) if surplus < 0 else "forever"
+        )
         color = TermColors.FAIL if surplus < 0 else TermColors.OKBLUE
         # logger.info(f"{res_name:40}{color:4}{surplus:10.1f}{TermColors.ENDC:4}{watches_sustainable_for!s:>10}{prod_info.available!s:10}")
-        logger.info(row_fstr.format(
-            res_name,
-            str(round(surplus, 1)),
-            watches_sustainable_for,
-            "{:,}".format(prod_info.available),
-            color=color,
-        ))
+        logger.info(
+            row_fstr.format(
+                res_name,
+                str(round(surplus, 1)),
+                watches_sustainable_for,
+                "{:,}".format(prod_info.available),
+                color=color,
+            )
+        )
