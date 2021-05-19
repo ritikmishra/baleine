@@ -19,6 +19,7 @@ from anacreonlib.types.response_datatypes import (
     AnacreonObject,
 )
 from anacreonlib.types.type_hints import Location
+from anacreonlib.types.scenario_info_datatypes import ScenarioInfo
 from rx.operators import first
 
 from scripts.context import AnacreonContext
@@ -184,7 +185,7 @@ async def dump_scn_to_json(
     logger = logging.getLogger("dump scn info")
 
     logger.info("getting scenario info")
-    scn_info = await context.client.get_game_info(
+    scn_info: ScenarioInfo = await context.client.get_game_info(
         context.base_request.auth_token, context.base_request.game_id
     )
     logger.info("retrieved scnn info!")
@@ -192,7 +193,7 @@ async def dump_scn_to_json(
     _ensure_filename_exists(filename)
 
     with open(filename, "w") as f:
-        json.dump(scn_info, f, indent=4)
+        json.dump(scn_info.dict(by_alias=True), f, indent=4)
     logger.info("saved it to disk!")
 
 
@@ -265,7 +266,7 @@ async def scout_around_planet(
     logger = logging.getLogger(f"explore around planet {center_world_id}")
 
     if resource_dict is None:
-        resource_dict = {102: 5}
+        resource_dict = {101: 5} # 5 helions
     if source_obj_id is None:
         source_obj_id = center_world_id
 
