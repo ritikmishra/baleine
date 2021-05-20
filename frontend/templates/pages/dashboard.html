@@ -1,0 +1,70 @@
+{% extends "layout/index.html" %}
+
+{% block head %}
+<style>
+    .green {
+        color: rgb(136, 151, 0)
+    }
+
+    .cyan {
+        color: rgb(66, 155, 155)
+    }
+
+    #logs {
+        height: 60vh;
+        overflow: scroll;
+        white-space: pre;
+        font-family: monospace;
+        padding: 10px;
+        color: black;
+        background-color: rgba(245, 245, 245, 0.741);
+    }
+</style>
+{% endblock %}
+
+{% block end %}
+<script>
+    const logs = document.getElementById("logs");
+
+    let stickToBottom = true;
+
+    const scrollToLogsBottom = () => {
+        logs.lastElementChild?.scrollIntoView({ block: "end", inline: "start", behavior: "smooth" });
+    }
+
+    const mutationObserver = new MutationObserver((mutations) => {
+        console.log("mutated!")
+        for (const mutation of mutations) {
+            if (mutation.type === "childList" && stickToBottom) {
+                scrollToLogsBottom();
+            }
+        }
+    });
+    mutationObserver.observe(logs, { childList: true, subtree: true });
+
+</script>
+{% endblock %}
+
+{% block content %}
+
+<h1 class="title">Action dashboard</h1>
+
+<div class="columns">
+    <div class="column">
+        <button class="button is-success"></button>
+    </div>
+
+    <div class="column is-four-fifths">
+        <label>
+            <input type="checkbox" checked onchange="stickToBottom = this.checked">
+            Stick to bottom
+        </label>
+
+        <div hx-ws="connect:/log_stream">
+            <div id="logs"></div>
+        </div>
+    </div>
+</div>
+
+
+{% endblock %}
