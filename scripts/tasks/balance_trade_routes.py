@@ -4,6 +4,7 @@ import logging
 from pprint import pprint
 from dataclasses import replace, dataclass
 from scripts import utils
+import anacreonlib.exceptions
 from anacreonlib.types.type_hints import Location
 from typing import (
     Callable,
@@ -262,9 +263,12 @@ async def balance_routes_for_one_resource(
         # pprint(req)
         if not dry_run:
             try:
+                await asyncio.sleep(1)
                 res = await context.client.set_trade_route(req)
             except asyncio.exceptions.TimeoutError:
                 requests.append(req)
+            except anacreonlib.exceptions.HexArcException:
+                pass
             else:
                 context.register_response(res)
 
