@@ -1,6 +1,7 @@
 import asyncio
 from frontend.services import anacreon_context
 from frontend import surplus_scatterplot_route
+from frontend import test_log_streaming
 from fastapi import FastAPI
 
 from scripts.utils import TermColors
@@ -23,3 +24,4 @@ async def setup_periodic_update() -> None:
 
 
 app.include_router(surplus_scatterplot_route.router)
+app.include_router(test_log_streaming.router)
