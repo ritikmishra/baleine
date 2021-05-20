@@ -1,5 +1,5 @@
 import math
-from typing import List, Dict, Sequence, TypeVar, Union, Tuple, overload
+from typing import List, Dict, Optional, Sequence, TypeVar, Union, Tuple, cast, overload
 
 from anacreonlib.types.response_datatypes import World, Trait
 from anacreonlib.types.scenario_info_datatypes import ScenarioInfoElement
@@ -150,6 +150,27 @@ def type_supercedes_type(
             for trait in later_improvement.build_upgrade
         )
     return False
+
+
+def get_world_primary_industry_products(world: World) -> Optional[List[int]]:
+    primary_industry = next(
+        (
+            trait
+            for trait in world.traits
+            if isinstance(trait, Trait) and trait.is_primary
+        ),
+        None,
+    )
+
+    if primary_industry is None or primary_industry.production_data is None:
+        return None
+
+    return [
+        cast(int, res_id)
+        for res_id, pct_alloc, cannot_build in flat_list_to_n_tuples(
+            3, primary_industry.build_data
+        )
+    ]
 
 
 class TermColors:
