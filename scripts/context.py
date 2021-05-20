@@ -211,6 +211,16 @@ class AnacreonContext:
         self._logger.debug("Integrated partial state")
         return self.state
 
+    async def update_once(self) -> None:
+        try:
+            partial_state = await self.client.get_objects(self.base_request)
+            full_state = self.register_response(partial_state)
+            self.watch_update_observable.on_next(full_state)
+        except Exception as e:
+            self._logger.error(
+                f"Issue doing watch update! Message: {str(e)}", exc_info=True
+            )
+
     async def periodically_update_objects(self, *, period: int = 60) -> None:
         """
         Coroutine that runs forever, calling getObjects every so often
@@ -218,14 +228,7 @@ class AnacreonContext:
         while True:
             sleep: Awaitable[None] = asyncio.sleep(period)
             sleep_future = asyncio.create_task(sleep)
-            try:
-                partial_state = await self.client.get_objects(self.base_request)
-                full_state = self.register_response(partial_state)
-                self.watch_update_observable.on_next(full_state)
-            except Exception as e:
-                self._logger.error(
-                    f"Issue doing watch update! Message: {str(e)}", exc_info=True
-                )
+            await self.update_once()            
             await sleep_future
 
     def __del__(self) -> None:
