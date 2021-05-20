@@ -8,6 +8,9 @@ anacreonlib = {editable = true, path = "./../anacreonlib"}
 rx = "*"
 matplotlib = "*"
 numpy = "*"
+uvicorn = {extras = ["standard"], version = "*"}
+fastapi = "*"
+jinja2 = "*"
 
 [dev-packages]
 mypy = "*"
@@ -18,3 +21,10 @@ python_version = "3.8"
 
 [pipenv]
 allow_prereleases = true
+
+[scripts]
+# run the frontend web server
+frontend = "uvicorn frontend.app:app"
+
+# run scripts/__main__.py
+scripts = "python -m scripts"

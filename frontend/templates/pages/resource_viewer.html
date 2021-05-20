@@ -1,0 +1,79 @@
+{% extends "layout/index.html" %}
+
+{% block end %}
+<script>
+    // Yes, JSON is technically not a subset of Javascript
+    // No, i don't care
+    const plot = {{ plot | tojson }}
+    const plotDiv = document.getElementById("plot");
+
+    let showText = false;
+
+    let layout = {
+        margin: {},
+        height: 1000,
+        // width: 1000,
+        xaxis: { domain: [0, 10] },
+        yaxis: { scaleanchor: "x" },
+        hovermode: "closest"
+    }
+
+    const rerenderPlot = () => {
+        Plotly.newPlot(plotDiv, [
+            {
+                mode: showText ? 'markers+text' : 'markers',
+                textposition: 'bottom center',
+                type: 'scatter',
+
+                hoverinfo: 'x+y+text',
+
+                text: plot.text,
+                hovertext: plot.hovertext,
+                x: plot.x,
+                y: plot.y,
+                // text: ['a', 'b', 'c', 'd'],
+                // x: [2, 1, 1, 2],
+                // y: [2, 2, 1, 1],
+                marker: {
+                    color: plot.color,
+                    // color: [1, 2, 3, 10],
+                    size: 12,
+                    cmid: 0
+                }
+            }
+        ], layout, { responsive: true })
+    };
+
+    rerenderPlot();
+</script>
+{% endblock %}
+
+{% block content %}
+
+<h1 class="title">Resource Viewer</h1>
+<p class="subtitle">View resource production and consumption across the empire</p>
+
+<div class="columns">
+    <div class="column">
+        <div class="control">
+            <div class="select">
+                <select id="resource_selector" onchange="window.location = this.value">
+                    {% for id, obj in commodity_resources %}
+                    <option value="{{id}}" {% if id==resource_id %} selected="selected" {% endif %}>{{obj.name_desc}}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+    <div class="column">
+        <label class="checkbox"><input type="checkbox" onchange="showText=this.checked; rerenderPlot()">Show
+            labels</label>
+    </div>
+</div>
+
+
+
+<div id="plot"></div>
+
+{% endblock %}
