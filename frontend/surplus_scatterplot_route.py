@@ -109,7 +109,7 @@ def create_resource_scatterplot(
 router = APIRouter(prefix="/resource_scatterplot")
 
 
-@router.get("/")
+@router.get("/", name="scatterplot_root")
 def resource_scatterplot_trillum(
     context: AnacreonContext = Depends(anacreon_context),
 ) -> RedirectResponse:
