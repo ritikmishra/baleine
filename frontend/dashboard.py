@@ -76,16 +76,17 @@ def dashboard(request: Request) -> Response:
 async def run_anacreon_task(
     action_idx: int,
     context: AnacreonContext = Depends(anacreon_context),
-):
+) -> None:
     logger = logging.getLogger("run_anacreon_task")
     async_callable = dashboard_functions[action_idx][1]
 
-    async def wrapper():
+    async def wrapper() -> None:
+        task_name = dashboard_functions[action_idx][0]
+        logger.info(f"Starting execution of task {task_name}")
         await async_callable(context=context)
-        logger.info(f"Done executing task '{dashboard_functions[action_idx][0]}'")
+        logger.info(f"Done executing task '{task_name}'")
 
     asyncio.create_task(wrapper())
-    return None
 
 
 @router.websocket("/log_stream", name="log_stream")

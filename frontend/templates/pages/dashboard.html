@@ -12,6 +12,7 @@
 
     #logs {
         height: 60vh;
+        width: 100%;
         overflow: scroll;
         white-space: pre;
         font-family: monospace;
@@ -59,7 +60,8 @@
         {% endfor %}
     </div>
 
-    <div class="column">
+    <div class="column" style="min-width: 1px;"> {# min-width required to stop the column from becoming wider than the
+        parent #}
         <label>
             <input type="checkbox" checked onchange="stickToBottom = this.checked">
             Stick to bottom
