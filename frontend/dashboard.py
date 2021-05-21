@@ -1,14 +1,32 @@
 import asyncio
 import logging
 import logging.handlers
-from typing import Any, AsyncGenerator, Optional, cast
+
+from fastapi.param_functions import Depends
+from scripts.context import AnacreonContext
+from typing import Any, AsyncGenerator, Callable, Coroutine, List, Optional, Tuple, cast
 
 from fastapi import Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.routing import APIRouter
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
-from frontend.services import templates
+from frontend.services import anacreon_context, templates
+
+from scripts.tasks import (
+    improvement_related_tasks,
+    garbage_collect_trade_routes,
+    balance_trade_routes,
+)
+
+dashboard_functions: List[Tuple[str, Callable[..., Coroutine[Any, Any, Any]]]] = [
+    ("Auto-build structures", improvement_related_tasks.build_habitats_spaceports),
+    (
+        "Garbage-collect trade routes",
+        garbage_collect_trade_routes.garbage_collect_trade_routes,
+    ),
+    ("Balance trade routes", balance_trade_routes.balance_trade_routes),
+]
 
 
 async def stream_logs_async(
@@ -49,10 +67,28 @@ router = APIRouter()
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request) -> Response:
-    return templates.TemplateResponse("pages/dashboard.html", {"request": request})
+    return templates.TemplateResponse(
+        "pages/dashboard.html", {"request": request, "actions": dashboard_functions}
+    )
 
 
-@router.websocket("/log_stream")
+@router.post("/api/run_task/{action_idx}", name="run_task", status_code=204)
+async def run_anacreon_task(
+    action_idx: int,
+    context: AnacreonContext = Depends(anacreon_context),
+):
+    logger = logging.getLogger("run_anacreon_task")
+    async_callable = dashboard_functions[action_idx][1]
+
+    async def wrapper():
+        await async_callable(context=context)
+        logger.info(f"Done executing task '{dashboard_functions[action_idx][0]}'")
+
+    asyncio.create_task(wrapper())
+    return None
+
+
+@router.websocket("/log_stream", name="log_stream")
 async def stream_logs_ws_example(websocket: WebSocket) -> None:
     await websocket.accept()
     try:

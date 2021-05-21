@@ -50,17 +50,22 @@
 <h1 class="title">Action dashboard</h1>
 
 <div class="columns">
-    <div class="column">
-        <button class="button is-success"></button>
+    <div class="column is-narrow">
+        {% for title, _ in actions %}
+        <div class="buttons are-small">
+            <button class="button is-success is-fullwidth" hx-swap="none" hx-post="/api/run_task/{{loop.index0}}"
+                hx-trigger="click">{{title}}</button>
+        </div>
+        {% endfor %}
     </div>
 
-    <div class="column is-four-fifths">
+    <div class="column">
         <label>
             <input type="checkbox" checked onchange="stickToBottom = this.checked">
             Stick to bottom
         </label>
 
-        <div hx-ws="connect:/log_stream">
+        <div hx-ws="connect:{{url_for('log_stream')}}">
             <div id="logs"></div>
         </div>
     </div>
