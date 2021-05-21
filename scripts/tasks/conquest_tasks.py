@@ -23,7 +23,7 @@ class FleetBucket(abc.ABC):
     fleet_identifiers: Set[NameOrId]
     output_bucket: Optional[FleetBucket]
     bucket_name: str = dataclasses.field(init=False)
-    queue: 'asyncio.Queue[OrderedPlanetId]' = dataclasses.field(
+    queue: "asyncio.Queue[OrderedPlanetId]" = dataclasses.field(
         default_factory=asyncio.PriorityQueue, init=False, repr=False
     )
 
@@ -211,7 +211,13 @@ class NailFleetBucket(FleetBucket):
 
 
 async def conquer_independents_around_id(
-    context: AnacreonContext, center_planet: Set[NameOrId], *, radius=250, **kwargs
+    context: AnacreonContext,
+    center_planet: Set[NameOrId],
+    *,
+    radius=250,
+    generic_hammer_fleets: Set[NameOrId],
+    nail_fleets: Set[NameOrId],
+    anti_missile_hammer_fleets: Optional[Set[NameOrId]] = None,
 ):
     capitals = [
         world
@@ -231,7 +237,13 @@ async def conquer_independents_around_id(
         )
     ]
 
-    return await conquer_planets(context, possible_victims, **kwargs)
+    return await conquer_planets(
+        context,
+        possible_victims,
+        generic_hammer_fleets=generic_hammer_fleets,
+        nail_fleets=nail_fleets,
+        anti_missile_hammer_fleets=anti_missile_hammer_fleets,
+    )
 
 
 async def conquer_planets(
@@ -240,7 +252,7 @@ async def conquer_planets(
     *,
     generic_hammer_fleets: Set[NameOrId],
     nail_fleets: Set[NameOrId],
-    anti_missile_hammer_fleets: Set[NameOrId] = None,
+    anti_missile_hammer_fleets: Optional[Set[NameOrId]] = None,
 ):
     nail_bucket = NailFleetBucket(fleet_identifiers=nail_fleets)
     hammer_bucket = HammerFleetBucket(
@@ -338,12 +350,11 @@ async def conquer_planets_using_buckets(
     # Step 3: fire up coroutines
     def future_callback(fut: asyncio.Future):
         logger.info("A future has completed!")
-        if fut.exception() is not None:
-            logger.error("Error occured on future!")
-            logger.error(fut.exception())
+        if (exc := fut.exception()) is not None:
+            logger.error("Error occured on future!", exc_info=exc)
 
     logger.info("Firing up coroutines . . .")
-    fleet_bucket_futures: List[List[Future]] = []
+    fleet_bucket_futures: "List[asyncio.Task[None]]" = []
 
     for i, bucket in enumerate(fleet_buckets):
         futures_for_current_bucket = []
@@ -351,13 +362,16 @@ async def conquer_planets_using_buckets(
             future = asyncio.create_task(bucket.pilot_fleet(context, fleet_id))
             future.add_done_callback(future_callback)
             futures_for_current_bucket.append(future)
-        fleet_bucket_futures.append(futures_for_current_bucket)
+        fleet_bucket_futures.extend(futures_for_current_bucket)
 
     logger.info("Coroutines turned on, waiting for queues to empty . . .")
     await asyncio.gather(*(bucket.queue.join() for bucket in fleet_buckets))
 
-    logger.info("Queues are empty")
-    for future in chain(*fleet_bucket_futures):
+    logger.info(
+        "Queues are empty, waiting five minutes before forcefully cancelling futures"
+    )
+    await asyncio.sleep(5 * 60)
+    for future in fleet_bucket_futures:
         if not future.done():
             logger.warning("Had to cancel a coroutine ... why wasn't it done?")
             future.cancel()
