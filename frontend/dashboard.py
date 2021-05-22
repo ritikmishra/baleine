@@ -1,3 +1,4 @@
+import functools
 import asyncio
 import logging
 import logging.handlers
@@ -6,12 +7,14 @@ from fastapi.param_functions import Depends
 from scripts.context import AnacreonContext
 from typing import Any, AsyncGenerator, Callable, Coroutine, List, Optional, Tuple, cast
 
-from fastapi import Request, Response
+from fastapi import Request, Response, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.routing import APIRouter
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
 from frontend.services import anacreon_context, templates
+
+from dataclasses import dataclass
 
 from scripts.tasks import (
     improvement_related_tasks,
@@ -19,13 +22,45 @@ from scripts.tasks import (
     balance_trade_routes,
 )
 
-dashboard_functions: List[Tuple[str, Callable[..., Coroutine[Any, Any, Any]]]] = [
-    ("Auto-build structures", improvement_related_tasks.build_habitats_spaceports),
-    (
+
+@dataclass
+class DashboardFunction:
+    name: str
+    func: Callable[..., Coroutine[Any, Any, Any]]
+    concurrent_allowed: bool = False
+
+    def __post_init__(self) -> None:
+        self.lock: Optional[asyncio.Lock] = None
+
+        if not self.concurrent_allowed:
+            lock = asyncio.Lock()
+
+            # wrapper around the function that can only be executed once
+            old_func = self.func
+
+            @functools.wraps(old_func)
+            async def new_func(*args: Any, **kwargs: Any) -> Any:
+                if self.lock.locked():
+                    logging.info(f"cannot concurrently execute task {repr(self.name)}")
+                else:
+                    async with self.lock:
+                        await old_func(*args, **kwargs)
+
+            self.func = new_func
+            self.lock = lock
+
+
+dashboard_functions: List[DashboardFunction] = [
+    DashboardFunction(
+        "Auto-build structures", improvement_related_tasks.build_habitats_spaceports
+    ),
+    DashboardFunction(
         "Garbage-collect trade routes",
         garbage_collect_trade_routes.garbage_collect_trade_routes,
     ),
-    ("Balance trade routes", balance_trade_routes.balance_trade_routes),
+    DashboardFunction(
+        "Balance trade routes", balance_trade_routes.balance_trade_routes
+    ),
 ]
 
 
@@ -78,13 +113,12 @@ async def run_anacreon_task(
     context: AnacreonContext = Depends(anacreon_context),
 ) -> None:
     logger = logging.getLogger("run_anacreon_task")
-    async_callable = dashboard_functions[action_idx][1]
+    dashboard_func = dashboard_functions[action_idx]
 
     async def wrapper() -> None:
-        task_name = dashboard_functions[action_idx][0]
-        logger.info(f"Starting execution of task {task_name}")
-        await async_callable(context=context)
-        logger.info(f"Done executing task '{task_name}'")
+        logger.info(f"Starting execution of task {dashboard_func.name}")
+        await dashboard_func.func(context=context)
+        logger.info(f"Done executing task '{dashboard_func.name}'")
 
     asyncio.create_task(wrapper())
 
