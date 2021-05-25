@@ -20,6 +20,7 @@ from scripts.tasks import (
     improvement_related_tasks,
     garbage_collect_trade_routes,
     balance_trade_routes,
+    simple_tasks,
 )
 
 
@@ -63,6 +64,10 @@ dashboard_functions: List[DashboardFunction] = [
     ),
     DashboardFunction(
         "Balance trade routes", balance_trade_routes.balance_trade_routes
+    ),
+    DashboardFunction(
+        "Deallocate defense structures",
+        simple_tasks.zero_out_defense_structure_allocation,
     ),
 ]
 
