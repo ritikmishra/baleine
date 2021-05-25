@@ -8,6 +8,7 @@ from typing import (
     Any,
     Awaitable,
     DefaultDict,
+    Generator,
     List,
     Sequence,
     Tuple,
@@ -161,6 +162,10 @@ class AnacreonContext:
         self.any_update_observable.on_next(self._state)
 
     @property
+    def our_worlds(self) -> Generator[OwnedWorld, None, None]:
+        return (world for world in self.state if isinstance(world, OwnedWorld))
+
+    @property
     def state_dict(self) -> Dict[int, AnacreonObjectWithId]:
         return self._state_dict
 
@@ -228,7 +233,7 @@ class AnacreonContext:
         while True:
             sleep: Awaitable[None] = asyncio.sleep(period)
             sleep_future = asyncio.create_task(sleep)
-            await self.update_once()            
+            await self.update_once()
             await sleep_future
 
     def __del__(self) -> None:
@@ -373,10 +378,7 @@ class AnacreonContext:
         return valid_improvement_ids
 
     def get_obj_by_id(self, id: int) -> Optional[AnacreonObjectWithId]:
-        try:
-            return self.state_dict[id]
-        except KeyError:
-            return None
+        return self.state_dict.get(id, None)
 
     def get_scn_info_el_name(self, res_id: int) -> str:
         return self.scenario_info_objects[res_id].name_desc or str(res_id)
@@ -470,7 +472,9 @@ class AnacreonContext:
                     # The data for this trade route belongs to another planet
                     partner_obj = self.get_obj_by_id(trade_route.partner_obj_id)
                     # would be sorta dumb if our trade route partner didn't actually exist
-                    assert partner_obj is not None and isinstance(partner_obj, World)
+                    assert isinstance(
+                        partner_obj, World
+                    ), f"(world {worldobj.id}) partner id {repr(trade_route.partner_obj_id)} was a {type(partner_obj)} instead of World!"
 
                     # would also be dumb if our trade route partner didn't have any trade routes
                     assert (
