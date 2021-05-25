@@ -72,6 +72,47 @@
     </div>
 </div>
 
+<div class="level">
+    <div class="level-item has-text-centered">
+        <div>
+            <p class="heading">Total Actual Production</p>
+            <p class="title">{{prod_info.produced | format_num}}</p>
+        </div>
+    </div>
+    <div class="level-item has-text-centered">
+        <div>
+            <p class="heading">Total Actual Consumption</p>
+            <p class="title">{{prod_info.consumed | format_num}}</p>
+        </div>
+    </div>
+    <div class="level-item has-text-centered">
+        <div>
+            <p class="heading">Underproduction amount</p>
+            {% set extra_prod = prod_info.produced - prod_info.produced_optimal%}
+            <p class="title {{'has-text-danger' if extra_prod < 0 else 'has-text-success'}}">
+                {{extra_prod | format_num}}
+            </p>
+        </div>
+    </div>
+    <div class="level-item has-text-centered">
+        <div>
+            <p class="heading">Underconsumption amount</p>
+            {% set extra_consumption = prod_info.consumed - prod_info.consumed_optimal %}
+            <p class="title {{'has-text-danger' if extra_consumption < 0 else 'has-text-success'}}">
+                {{extra_consumption | format_num}}
+            </p>
+        </div>
+    </div>
+</div>
+
+<div class="level">
+    <div class="level-item has-text-centered">
+        <div>
+            <p class="heading">Total stockpile</p>
+            <p class="title">{{total_stockpile | format_num}}</p>
+        </div>
+    </div>
+</div>
 
 
 <div id="plot"></div>

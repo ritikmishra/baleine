@@ -32,4 +32,10 @@ class AnacreonContextDependency:
 
 anacreon_context = AnacreonContextDependency()
 
+
+def format_num(number: float) -> str:
+    return "{:,.2f}".format(number)
+
+
 templates = Jinja2Templates(directory=str(pathlib.Path(__file__).parent / "templates"))
+templates.env.filters["format_num"] = format_num

@@ -54,7 +54,7 @@
     <div class="column is-narrow">
         {% for action in actions %}
         <div class="buttons are-small">
-            <button class="button is-success is-fullwidth" hx-swap="none" hx-post="/api/run_task/{{loop.index0}}"
+            <button class="button is-dark is-fullwidth" hx-swap="none" hx-post="/api/run_task/{{loop.index0}}"
                 hx-trigger="click">{{action.name}}</button>
         </div>
         {% endfor %}

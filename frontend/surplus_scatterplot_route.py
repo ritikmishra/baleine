@@ -106,6 +106,31 @@ def create_resource_scatterplot(
     return plot_points_to_plot(points)
 
 
+def find_total_produced_consumed(
+    context: AnacreonContext, resource_id: int
+) -> ProductionInfo:
+    our_worlds = (world for world in context.state if isinstance(world, OwnedWorld))
+    total = ProductionInfo()
+    for world in our_worlds:
+        prod_info = context.generate_production_info(world).get(
+            resource_id, ProductionInfo()
+        )
+        total += prod_info
+
+    return total
+
+
+def find_total_stockpile(context: AnacreonContext, resource_id: int) -> float:
+    our_worlds = (world for world in context.state if isinstance(world, OwnedWorld))
+    total = 0.0
+    for world in our_worlds:
+        resource_id_to_qty_map = dict(
+            scripts.utils.flat_list_to_tuples(world.resources)
+        )
+        total += resource_id_to_qty_map.get(resource_id, 0.0)
+    return total
+
+
 router = APIRouter(prefix="/resource_scatterplot")
 
 
@@ -127,6 +152,10 @@ async def resource_scatterplot(
 ) -> Response:
     plot = create_resource_scatterplot(context, resource_id)
 
+    resoure_aggregate_prod_info = find_total_produced_consumed(context, resource_id)
+
+    total_stockpile = find_total_stockpile(context, resource_id)
+
     commodity_resources: List[Tuple[int, ScenarioInfoElement]] = [
         (id, obj)
         for id, obj in context.scenario_info_objects.items()
@@ -139,6 +168,8 @@ async def resource_scatterplot(
             "request": request,
             "resource_id": resource_id,
             "plot": plot,
+            "prod_info": resoure_aggregate_prod_info,
+            "total_stockpile": total_stockpile,
             "commodity_resources": commodity_resources,
         },
     )
