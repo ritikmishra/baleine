@@ -18,7 +18,7 @@ from scripts.context import AnacreonContext
 class OrderedPlanetId(NamedTuple):
     """Allows for putting planet IDs into a PriorityQueue or similar construct"""
 
-    order: int
+    order: float
     id: int
 
 
@@ -28,6 +28,20 @@ def find_fleet(fleet_id: int, *, state=None, context=None):
         for fleet in (state or context.state)
         if isinstance(fleet, Fleet) and fleet.id == fleet_id
     )
+
+
+async def wait_for_fleet(context: AnacreonContext, fleet_id: int) -> Fleet:
+    fleet_obj: Fleet = find_fleet(fleet_id, context=context)
+    if fleet_obj.eta:
+        while True:
+            # the fleet is en route so we have to wait for it to finish
+            full_state = await context.watch_update_observable.pipe(first())
+            fleet_obj = find_fleet(fleet_id, state=full_state)
+            if fleet_obj.anchor_obj_id:
+                break
+            logging.info(f"Still waiting for fleet id {fleet_id} to get to destination")
+
+    return fleet_obj
 
 
 async def fleet_walk(
