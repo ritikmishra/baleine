@@ -1,30 +1,35 @@
+from enum import Enum, IntEnum, auto
 import pathlib
 from contextlib import suppress
 import asyncio
 import functools
 import json
 import logging
-from typing import List, Callable, Dict, Optional
+from typing import List, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from anacreonlib.types.request_datatypes import (
     SetFleetDestinationRequest,
     DeployFleetRequest,
+    SetIndustryAllocRequest,
 )
 from anacreonlib.types.response_datatypes import (
     Fleet,
+    OwnedWorld,
     ReigningSovereign,
+    Trait,
     World,
     AnacreonObject,
 )
 from anacreonlib.types.type_hints import Location
-from anacreonlib.types.scenario_info_datatypes import ScenarioInfo
+from anacreonlib.types.scenario_info_datatypes import Category, Role, ScenarioInfo
+import anacreonlib.exceptions
 from rx.operators import first
 
 from scripts.context import AnacreonContext
 from scripts.creds import SOV_ID
-from scripts.utils import flat_list_to_tuples, dist, dict_to_flat_list
+from scripts.utils import flat_list_to_tuples, dist, dict_to_flat_list, world_has_trait
 
 
 def _exploration_outline_to_points(outline: List[List[float]]) -> List[Location]:
@@ -176,6 +181,8 @@ def dump_state_to_json(
     with open(filename, "w") as f:
         json.dump(all_raw_objects, f, indent=4)
 
+    with open("out/could_not_deserialize.json", "w") as f:
+        json.dump([obj for obj in state_subset if isinstance(obj, dict)], f, indent=4)
     logger.info("state dump complete!")
 
 
@@ -266,7 +273,7 @@ async def scout_around_planet(
     logger = logging.getLogger(f"explore around planet {center_world_id}")
 
     if resource_dict is None:
-        resource_dict = {101: 5} # 5 helions
+        resource_dict = {101: 5}  # 5 helions
     if source_obj_id is None:
         source_obj_id = center_world_id
 
@@ -282,3 +289,78 @@ async def scout_around_planet(
     await send_fleet_to_worlds_meeting_predicate(
         context, source_obj_id, resource_dict, is_world_in_radius, logger=logger
     )
+
+
+class ZeroOutDefenseStructureAllocationMode(IntEnum):
+    AUTONOMOUS_WORLDS = auto()
+    DESIGNATED_WORLDS = auto()
+    ALL_WORLDS = auto()
+
+
+async def zero_out_defense_structure_allocation(
+    context: AnacreonContext,
+    mode: ZeroOutDefenseStructureAllocationMode = ZeroOutDefenseStructureAllocationMode.DESIGNATED_WORLDS,
+) -> None:
+    logger = logging.getLogger("zero_out_defense_structure_allocation")
+
+    autonomous_desig = context.get_scn_info_el_unid("core.autonomousDesignation")
+
+    defense_structure_ids = {
+        kind.id: kind.name_desc
+        for kind in context.scenario_info_objects.values()
+        if kind.category == Category.IMPROVEMENT
+        and (
+            kind.role == Role.ORBITAL_DEFENSE_INDUSTRY
+            or kind.role == Role.GROUND_DEFENSE_INDUSTRY
+            or kind.role == Role.ACADEMY_INDUSTRY
+        )
+        and kind.id is not None
+    }
+
+    orders: List[Tuple[str, SetIndustryAllocRequest]] = []
+    our_worlds = (world for world in context.state if isinstance(world, OwnedWorld))
+    if mode == ZeroOutDefenseStructureAllocationMode.AUTONOMOUS_WORLDS:
+        worlds_to_deallocate = (
+            world for world in our_worlds if world.designation == autonomous_desig.id
+        )
+    elif mode == ZeroOutDefenseStructureAllocationMode.DESIGNATED_WORLDS:
+        worlds_to_deallocate = (
+            world for world in our_worlds if world.designation != autonomous_desig.id
+        )
+    else:
+        worlds_to_deallocate = our_worlds
+
+    for world in worlds_to_deallocate:
+        defense_structures_on_world = (
+            structure_id
+            for structure_id in defense_structure_ids
+            if world_has_trait(context.game_info.scenario_info, world, structure_id)
+        )
+
+        for structure_id in defense_structures_on_world:
+            # Don't make orders if the allocation is already 0
+            if (
+                isinstance((trait := world.squashed_trait_dict[structure_id]), Trait)
+                and trait.target_allocation == 0
+            ):
+                continue
+
+            orders.append(
+                (
+                    f"Deallocate [{defense_structure_ids[structure_id]}] on world [{world.name}] (id {world.id})",
+                    SetIndustryAllocRequest(
+                        world_id=world.id,
+                        industry_id=structure_id,
+                        alloc_value=0,
+                        **context.auth,
+                    ),
+                )
+            )
+
+    for i, (info_txt, order) in enumerate(orders):
+        try:
+            logger.info(f"({i + 1}/{len(orders)}) {info_txt}")
+            await context.client.set_industry_alloc(order)
+            await asyncio.sleep(2)
+        except anacreonlib.exceptions.HexArcException:
+            logger.error("could not complete the previous order!")
