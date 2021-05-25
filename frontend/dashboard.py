@@ -10,7 +10,7 @@ from typing import Any, AsyncGenerator, Callable, Coroutine, List, Optional, Tup
 from fastapi import Request, Response, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.routing import APIRouter
-from fastapi.websockets import WebSocket, WebSocketDisconnect
+from fastapi.websockets import WebSocket
 
 from frontend.services import anacreon_context, templates
 
@@ -30,6 +30,7 @@ class DashboardFunction:
     concurrent_allowed: bool = False
 
     def __post_init__(self) -> None:
+        logger = logging.getLogger("run_anacreon_task")
         self.lock: Optional[asyncio.Lock] = None
 
         if not self.concurrent_allowed:
@@ -40,11 +41,13 @@ class DashboardFunction:
 
             @functools.wraps(old_func)
             async def new_func(*args: Any, **kwargs: Any) -> Any:
-                if self.lock.locked():
-                    logging.info(f"cannot concurrently execute task {repr(self.name)}")
+                if lock.locked():
+                    logger.error(f"cannot concurrently execute task {repr(self.name)}")
                 else:
-                    async with self.lock:
+                    async with lock:
+                        logger.info(f"Starting execution of task {self.name}")
                         await old_func(*args, **kwargs)
+                    logger.info(f"Done executing task '{self.name}'")
 
             self.func = new_func
             self.lock = lock
@@ -112,13 +115,10 @@ async def run_anacreon_task(
     action_idx: int,
     context: AnacreonContext = Depends(anacreon_context),
 ) -> None:
-    logger = logging.getLogger("run_anacreon_task")
     dashboard_func = dashboard_functions[action_idx]
 
     async def wrapper() -> None:
-        logger.info(f"Starting execution of task {dashboard_func.name}")
         await dashboard_func.func(context=context)
-        logger.info(f"Done executing task '{dashboard_func.name}'")
 
     asyncio.create_task(wrapper())
 
@@ -131,6 +131,7 @@ async def stream_logs_ws_example(websocket: WebSocket) -> None:
             await websocket.send_text(
                 f'<span id="logs" hx-swap-oob="beforeend">{log_msg}</span>'
             )
-    except WebSocketDisconnect:
+    finally:
         logging.info("closing websocket")
         await websocket.close()
+        logging.info("closed websocket")
