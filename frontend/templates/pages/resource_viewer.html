@@ -10,7 +10,7 @@
     let showText = false;
 
     let layout = {
-        margin: {},
+        margin: { t: 0 },
         height: 1000,
         // width: 1000,
         xaxis: { domain: [0, 10] },
@@ -53,22 +53,19 @@
 <h1 class="title">Resource Viewer</h1>
 <p class="subtitle">View resource production and consumption across the empire</p>
 
-<div class="columns">
-    <div class="column">
+<div class="level">
+    <div class="level-left">
         <div class="control">
             <div class="select">
                 <select id="resource_selector" onchange="window.location = this.value">
                     {% for id, obj in commodity_resources %}
-                    <option value="{{id}}" {% if id==resource_id %} selected="selected" {% endif %}>{{obj.name_desc}}
+                    <option value="{{id}}" {% if id==resource_id %} selected="selected" {% endif %}>
+                        {{obj.name_desc}}
                     </option>
                     {% endfor %}
                 </select>
             </div>
         </div>
-    </div>
-    <div class="column">
-        <label class="checkbox"><input type="checkbox" onchange="showText=this.checked; rerenderPlot()">Show
-            labels</label>
     </div>
 </div>
 
@@ -114,7 +111,31 @@
     </div>
 </div>
 
+<hr>
 
-<div id="plot"></div>
+<div class="columns">
+    <div class="column is-1">
+        <aside class="menu">
+            <p class="menu-label">Datasets</p>
+            <ul class="menu-list">
+                <li><a class="is-active">Resource prod+cons</a></li>
+                <li><a>Stockpiles</a></li>
+            </ul>
+        </aside>
+    </div>
+    <div class="column">
+
+        <div class="level">
+            <div class="level-item">
+                <label class="checkbox"><input type="checkbox" onchange="showText=this.checked; rerenderPlot()">
+                    &nbsp;Show labels
+                </label>
+            </div>
+        </div>
+        <div id="plot"></div>
+    </div>
+</div>
+
+
 
 {% endblock %}
