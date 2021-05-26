@@ -1,5 +1,16 @@
 import math
-from typing import List, Dict, Optional, Sequence, TypeVar, Union, Tuple, cast, overload
+from typing import (
+    Generator,
+    List,
+    Dict,
+    Optional,
+    Sequence,
+    TypeVar,
+    Union,
+    Tuple,
+    cast,
+    overload,
+)
 
 from anacreonlib.types.response_datatypes import World, Trait
 from anacreonlib.types.scenario_info_datatypes import ScenarioInfoElement
@@ -171,6 +182,21 @@ def get_world_primary_industry_products(world: World) -> Optional[List[int]]:
             3, primary_industry.build_data
         )
     ]
+
+
+_one_min_in_cycles = 1 / 1440
+
+
+def calculate_units_over_time(
+    initial_qty: int, half_life_in_cycles: float, production_per_watch: float = 0
+) -> Generator[int, None, None]:
+    current_qty = initial_qty
+    while True:
+        after_attrition = current_qty * 0.5 ** (_one_min_in_cycles / half_life_in_cycles)
+        after_production = after_attrition + production_per_watch
+        next_qty = int(after_production)
+        yield next_qty
+        current_qty = next_qty
 
 
 class TermColors:
