@@ -187,7 +187,7 @@ def get_world_primary_industry_products(world: World) -> Optional[List[int]]:
 _one_min_in_cycles = 1 / 1440
 
 
-def calculate_units_over_time(
+def calculate_attrition_equilibrium(
     initial_qty: int, half_life_in_cycles: float, production_per_watch: float = 0
 ) -> Generator[int, None, None]:
     current_qty = initial_qty

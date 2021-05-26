@@ -44,7 +44,8 @@ async def garbage_collect_trade_routes(context: AnacreonContext) -> None:
             f"({i + 1} of {len(garbage_trade_routes)}) Cancelling trade route for planet pair {pair}"
         )
 
-        await context.client.stop_trade_route(req)
+        partial_state = await context.client.stop_trade_route(req)
+        context.register_response(partial_state)
 
 
 def is_trade_route_garbage(route: TradeRoute) -> bool:
