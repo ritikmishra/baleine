@@ -1,9 +1,10 @@
 import asyncio
 import logging
-from typing import List, Union, Set
+from pprint import pprint
+from typing import List, Protocol, Union, Set
 
 from anacreonlib.types.request_datatypes import TransferFleetRequest, SellFleetRequest
-from anacreonlib.types.response_datatypes import Fleet, World
+from anacreonlib.types.response_datatypes import Fleet, Trait, World
 from anacreonlib.types.scenario_info_datatypes import ScenarioInfoElement
 from anacreonlib.types.type_hints import Location
 
@@ -11,6 +12,11 @@ from scripts import utils
 from scripts.context import AnacreonContext
 from scripts.tasks import NameOrId
 from scripts.tasks.fleet_manipulation_utils import fleet_walk, OrderedPlanetId
+
+
+class HasNameAndId(Protocol):
+    name: str
+    id: int
 
 
 async def sell_stockpile_of_resource(
@@ -31,7 +37,21 @@ async def sell_stockpile_of_resource(
     :return:
     """
 
-    def matches(obj: Union[World, Fleet], id_or_name_set: Set[NameOrId]) -> bool:
+    jumpbeacon_trait_ids = [
+        elt.id for elt in context.game_info.scenario_info if elt.is_jump_beacon and elt.id is not None
+    ]
+
+    our_jump_beacon_worlds = [
+        world
+        for world in context.our_worlds
+        if any(
+            (trait := world.squashed_trait_dict.get(jumpbeacon_trait_id, None)) is not None
+            and (not isinstance(trait, Trait) or trait.build_complete is None)
+            for jumpbeacon_trait_id in jumpbeacon_trait_ids
+        )
+    ]
+
+    def matches(obj: HasNameAndId, id_or_name_set: Set[NameOrId]) -> bool:
         """true if id/name set contains reference to the object"""
         try:
             return obj.name in id_or_name_set or obj.id in id_or_name_set
@@ -94,6 +114,7 @@ async def sell_stockpile_of_resource(
                 and utils.trait_inherits_from_trait(
                     context.game_info.scenario_info, world.designation, 289
                 )
+                and any(utils.dist(world.pos, jumpbeacon.pos) < 250 for jumpbeacon in our_jump_beacon_worlds)
             ),
             key=lambda w: utils.dist(pos, w.pos),
         )
