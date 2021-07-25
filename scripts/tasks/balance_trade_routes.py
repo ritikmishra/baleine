@@ -33,6 +33,8 @@ WorldFilter = Callable[[OwnedWorld], bool]
 class ResourceGraphEdge:
     source_world_id: int
     target_world_id: int
+
+    # Qty that was actually transferred, can be less than desired if there is a shortage
     resource_quantity: float
 
 
@@ -41,12 +43,15 @@ class ResourceImporterGraphNode:
     world_id: int
 
     # How much of the resource we *need* to import
+    # (i.e how much we are consuming)
     required_import_qty: float
 
     # How much of the resource we would like to consume/be importing
+    # (i.e imported_optimal)
     actual_import_qty: float
 
     # How much of the resource we consumed (takes stockpiles into account)
+    # (i.e anything we consumed but didn't import or produce locally comes from a stockpile)
     stockpile_consumed_qty: float
 
 
@@ -55,21 +60,12 @@ class ResourceExporterGraphNode:
     world_id: int
 
     # How much of the resource we need to get off of this planet
+    # (i.e how much is being produced, minus any local consumption)
     exportable_qty: float
 
-    # How much we would like to export from this world (based off of trade route)
+    # How much we would like to export from this world (based off of trade route).
+    # con be more than actual exports
     desired_export_qty: float
-
-
-@dataclass(frozen=True)
-class ResourceGraphNode:
-    world_id: int
-    exportable_qty: Optional[float]
-    required_import_qty: Optional[float]
-
-    def __post_init__(self) -> None:
-        assert (self.exportable_qty is None) != (self.required_import_qty is None)
-
 
 @dataclass(frozen=True, order=False)
 class PlanetPair:
@@ -409,16 +405,16 @@ def adjust_graph_edges(
             reverse=True,
         )
 
-        exporter_positions = [
+        exporter_surpluses = [
             (surplus, world_id)
             for surplus, world_id, location in exporter_positions
             if surplus > 0 and utils.dist(location, position_dict[importer_id]) < 200
         ]
 
-        if len(exporter_positions) == 0:
+        if len(exporter_surpluses) == 0:
             return None
 
-        return exporter_positions[0]
+        return exporter_surpluses[0]
 
     for deficit, exporter_id, exporter in overworked_exporters:
         importers_to_this_exporter = {
