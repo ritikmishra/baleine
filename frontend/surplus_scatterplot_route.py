@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, TypedDict
 
 import scripts
-from anacreonlib.types.response_datatypes import OwnedWorld, Trait
+import scripts.utils
+from anacreonlib.types.response_datatypes import Fleet, OwnedWorld, Trait, World
 from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfoElement
 from fastapi import Depends, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -55,10 +56,8 @@ def plot_points_to_plot(points: List[ScatterPlotPoint]) -> ScatterPlot:
 def create_resource_scatterplot(
     context: AnacreonContext, resource_id: int
 ) -> ScatterPlot:
-    worlds = [world for world in context.state if isinstance(world, OwnedWorld)]
-
     points: List[ScatterPlotPoint] = []
-    for world in worlds:
+    for world in context.our_worlds:
         exportable_ids = scripts.utils.get_world_primary_industry_products(world) or []
         prod_info = context.generate_production_info(world).get(
             resource_id, ProductionInfo()
@@ -98,7 +97,7 @@ def create_resource_scatterplot(
                 x=world.pos[0],
                 y=world.pos[1],
                 text=f"{world.name} (id: {world.id})",
-                hovertext=f"Surplus: {surplus}<br  />Industry name: {world_primary_industry_name}<br  />Exported ids: {'<br  />- '.join(exportable_item_names)}",
+                hovertext=f"Surplus: {surplus:,.2f}<br  />Industry name: {world_primary_industry_name}<br  />Exported ids: {'<br  />- '.join(exportable_item_names)}",
                 color=surplus,
             )
         )
@@ -109,9 +108,8 @@ def create_resource_scatterplot(
 def find_total_produced_consumed(
     context: AnacreonContext, resource_id: int
 ) -> ProductionInfo:
-    our_worlds = (world for world in context.state if isinstance(world, OwnedWorld))
     total = ProductionInfo()
-    for world in our_worlds:
+    for world in context.our_worlds:
         prod_info = context.generate_production_info(world).get(
             resource_id, ProductionInfo()
         )
@@ -121,15 +119,66 @@ def find_total_produced_consumed(
 
 
 def find_total_stockpile(context: AnacreonContext, resource_id: int) -> float:
-    our_worlds = (world for world in context.state if isinstance(world, OwnedWorld))
     total = 0.0
-    for world in our_worlds:
+    items_with_resources = (
+        item
+        for item in context.state
+        if isinstance(item, (World, Fleet))
+        and str(item.sovereign_id) == str(context.auth["sovereign_id"])
+    )
+
+    for world in items_with_resources:
         resource_id_to_qty_map = dict(
             scripts.utils.flat_list_to_tuples(world.resources)
         )
         total += resource_id_to_qty_map.get(resource_id, 0.0)
     return total
 
+
+def create_stockpile_scatterplot(
+    context: AnacreonContext, resource_id: int
+) -> ScatterPlot:
+    points: List[ScatterPlotPoint] = []
+
+    for world in context.our_worlds:
+
+        world_primary_industry = next(
+            (
+                trait
+                for trait in world.traits
+                if isinstance(trait, Trait) and trait.is_primary
+            ),
+            None,
+        )
+        world_primary_industry_name = (
+            context.scenario_info_objects[world_primary_industry.trait_id].name_desc
+            if world_primary_industry is not None
+            else None
+        )
+
+        resource_id_to_qty_map = dict(
+            scripts.utils.flat_list_to_tuples(world.resources)
+        )
+        stockpile = resource_id_to_qty_map.get(resource_id, 0.0)
+        points.append(
+            ScatterPlotPoint(
+                x=world.pos[0],
+                y=world.pos[1],
+                text=f"{world.name} (id: {world.id})",
+                hovertext=f"Stockpile: {stockpile:,.2f}<br  />Industry name: {world_primary_industry_name}",
+                color=stockpile,
+            )
+        )
+
+    return plot_points_to_plot(points)
+
+
+## blocker: need to get half life values in separately
+
+# def create_attrition_graph(context: AnacreonContext, res_id: int, total_stockpile: float, aggregate_prod_info: ProductionInfo):
+#     half_life = context.scenario_info_objects[res_id].
+#     points: List[ScatterPlotPoint] = []
+#     for watch, new_val in zip(range(10 * 1440), scripts.utils.calculate_units_over_time(total_stockpile, ))
 
 router = APIRouter(prefix="/resource_scatterplot")
 
@@ -168,6 +217,7 @@ async def resource_scatterplot(
             "request": request,
             "resource_id": resource_id,
             "plot": plot,
+            "stockpile_plot": create_stockpile_scatterplot(context, resource_id),
             "prod_info": resoure_aggregate_prod_info,
             "total_stockpile": total_stockpile,
             "commodity_resources": commodity_resources,

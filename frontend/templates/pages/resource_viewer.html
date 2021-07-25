@@ -5,42 +5,49 @@
     // Yes, JSON is technically not a subset of Javascript
     // No, i don't care
     const plot = {{ plot | tojson }}
+    const stockpilePlot = {{ stockpile_plot | tojson }}
+
     const plotDiv = document.getElementById("plot");
 
     let showText = false;
 
-    let layout = {
-        margin: { t: 0 },
+    const layout = {
+        margin: {},
         height: 1000,
         // width: 1000,
         xaxis: { domain: [0, 10] },
         yaxis: { scaleanchor: "x" },
-        hovermode: "closest"
+        hovermode: "closest",
+        //        showlegend: false
     }
+
+    const plotToTrace = (scatterplot, name) => ({
+        mode: showText ? 'markers+text' : 'markers',
+        textposition: 'bottom center',
+        type: 'scatter',
+        name,
+
+        hoverinfo: 'x+y+text',
+
+        text: scatterplot.text,
+        hovertext: scatterplot.hovertext,
+        x: scatterplot.x,
+        y: scatterplot.y,
+        // text: ['a', 'b', 'c', 'd'],
+        // x: [2, 1, 1, 2],
+        // y: [2, 2, 1, 1],
+        marker: {
+            color: scatterplot.color,
+            // color: [1, 2, 3, 10],
+            size: 12,
+            cmid: 0
+        }
+    })
 
     const rerenderPlot = () => {
         Plotly.newPlot(plotDiv, [
-            {
-                mode: showText ? 'markers+text' : 'markers',
-                textposition: 'bottom center',
-                type: 'scatter',
-
-                hoverinfo: 'x+y+text',
-
-                text: plot.text,
-                hovertext: plot.hovertext,
-                x: plot.x,
-                y: plot.y,
-                // text: ['a', 'b', 'c', 'd'],
-                // x: [2, 1, 1, 2],
-                // y: [2, 2, 1, 1],
-                marker: {
-                    color: plot.color,
-                    // color: [1, 2, 3, 10],
-                    size: 12,
-                    cmid: 0
-                }
-            }
+            plotToTrace(plot, "Production plot"),
+            plotToTrace(stockpilePlot, "Stockpile plot")
         ], layout, { responsive: true })
     };
 
