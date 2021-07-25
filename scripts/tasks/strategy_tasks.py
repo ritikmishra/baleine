@@ -3,7 +3,7 @@ import numpy as np
 from itertools import islice
 import logging
 import math
-from typing import Any, Tuple, Optional, List, Union, NewType
+from typing import Any, Dict, Tuple, Optional, List, Union, NewType
 
 from anacreonlib.types.response_datatypes import OwnedWorld, World
 
@@ -35,7 +35,6 @@ def find_sec_cap_candidates(context: AnacreonContext, ideal_dist: float = 432, a
     
     capital = next(world for world in our_worlds if context.scenario_info_objects[world.designation].role == "imperialCapital")
 
-    print(capital)
 
     capital_pos_nparray = np.array([capital.pos]).T
     logger.info(f"the capital pos is {capital_pos_nparray}")
@@ -57,7 +56,7 @@ def find_sec_cap_candidates(context: AnacreonContext, ideal_dist: float = 432, a
     our_capitals = [capital, *existing_sector_caps]
 
     def is_world_far_from_capital(world: World) -> bool:
-        return all(250 < utils.dist(world.pos, cap.pos) < (2 * ideal_dist) for cap in our_capitals)
+        return all(250 < utils.dist(world.pos, cap.pos) for cap in our_capitals)
 
     eligible_worlds = [
         world
@@ -67,6 +66,33 @@ def find_sec_cap_candidates(context: AnacreonContext, ideal_dist: float = 432, a
         and world.sovereign_id == 1
         and is_world_far_from_capital(world)
     ]
+
+
+    bests: Dict[BLocation, Tuple[float, World]] = {}
+
+    for world in (w for w in context.state if isinstance(w, World) and w.tech_level >= 5):
+        b_pos = to_triangle_grid_coords(world.pos)
+        nearest_int_coords: BLocation = BLocation((round(b_pos[0]), round(b_pos[1])))
+
+        dx, dy = (b_pos[0] - nearest_int_coords[0]), (b_pos[1] - nearest_int_coords[1])
+        error = math.sqrt((dx * dx) + (dy * dy))
+
+    
+        other_error, _ = bests.get(nearest_int_coords, (None, None))
+        if other_error is None or error < other_error:
+            bests[nearest_int_coords] = (error, world)
+
+    table_fstr = "{!s:6}{!s:30}{!s:20}{!s:20}{}"
+    logger.info(utils.TermColors.BOLD + table_fstr.format("id", "name", "a pos", "b pos", "error"))
+    for b_pos, error, world in sorted(((x, y, z) for x, (y, z) in bests.items()), key=lambda x: x[0]):
+        logger.info(table_fstr.format(
+            world.id,
+            world.name,
+            world.pos,
+            b_pos,
+            error
+        ))
+
 
     eligible_worlds.sort(key=lambda world: pos_error(world.pos))
 
