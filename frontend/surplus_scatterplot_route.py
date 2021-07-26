@@ -8,7 +8,7 @@ from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfoElem
 from fastapi import Depends, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.routing import APIRouter
-from scripts.context import AnacreonContext, ProductionInfo
+from anacreonlib.client_wrapper import AnacreonClientWrapper, ProductionInfo
 
 from frontend.services import anacreon_context, templates
 
@@ -54,10 +54,10 @@ def plot_points_to_plot(points: List[ScatterPlotPoint]) -> ScatterPlot:
 
 
 def create_resource_scatterplot(
-    context: AnacreonContext, resource_id: int
+    context: AnacreonClientWrapper, resource_id: int
 ) -> ScatterPlot:
     points: List[ScatterPlotPoint] = []
-    for world in context.our_worlds:
+    for world in (w for w in context.space_objects.values() if isinstance(w, OwnedWorld)):
         exportable_ids = scripts.utils.get_world_primary_industry_products(world) or []
         prod_info = context.generate_production_info(world).get(
             resource_id, ProductionInfo()
@@ -106,10 +106,10 @@ def create_resource_scatterplot(
 
 
 def find_total_produced_consumed(
-    context: AnacreonContext, resource_id: int
+    context: AnacreonClientWrapper, resource_id: int
 ) -> ProductionInfo:
     total = ProductionInfo()
-    for world in context.our_worlds:
+    for world in (w for w in context.space_objects.values() if isinstance(w, OwnedWorld)):
         prod_info = context.generate_production_info(world).get(
             resource_id, ProductionInfo()
         )
@@ -118,13 +118,12 @@ def find_total_produced_consumed(
     return total
 
 
-def find_total_stockpile(context: AnacreonContext, resource_id: int) -> float:
+def find_total_stockpile(context: AnacreonClientWrapper, resource_id: int) -> float:
     total = 0.0
     items_with_resources = (
         item
-        for item in context.state
-        if isinstance(item, (World, Fleet))
-        and str(item.sovereign_id) == str(context.auth["sovereign_id"])
+        for item in context.space_objects.values()
+        if str(item.sovereign_id) == str(context._auth_info.sovereign_id)
     )
 
     for world in items_with_resources:
@@ -136,11 +135,11 @@ def find_total_stockpile(context: AnacreonContext, resource_id: int) -> float:
 
 
 def create_stockpile_scatterplot(
-    context: AnacreonContext, resource_id: int
+    context: AnacreonClientWrapper, resource_id: int
 ) -> ScatterPlot:
     points: List[ScatterPlotPoint] = []
 
-    for world in context.our_worlds:
+    for world in (w for w in context.space_objects.values() if isinstance(w, OwnedWorld)):
 
         world_primary_industry = next(
             (
@@ -175,7 +174,7 @@ def create_stockpile_scatterplot(
 
 ## blocker: need to get half life values in separately
 
-# def create_attrition_graph(context: AnacreonContext, res_id: int, total_stockpile: float, aggregate_prod_info: ProductionInfo):
+# def create_attrition_graph(context: AnacreonClientWrapper, res_id: int, total_stockpile: float, aggregate_prod_info: ProductionInfo):
 #     half_life = context.scenario_info_objects[res_id].
 #     points: List[ScatterPlotPoint] = []
 #     for watch, new_val in zip(range(10 * 1440), scripts.utils.calculate_units_over_time(total_stockpile, ))
@@ -185,9 +184,9 @@ router = APIRouter(prefix="/resource_scatterplot")
 
 @router.get("/", name="scatterplot_root")
 def resource_scatterplot_trillum(
-    context: AnacreonContext = Depends(anacreon_context),
+    context: AnacreonClientWrapper = Depends(anacreon_context),
 ) -> RedirectResponse:
-    trillum_res_id = context.get_scn_info_el_unid("core.trillum").id
+    trillum_res_id = context.game_info.find_by_unid("core.trillum").id
     assert trillum_res_id is not None
 
     return RedirectResponse(f"/resource_scatterplot/{trillum_res_id}")
@@ -197,7 +196,7 @@ def resource_scatterplot_trillum(
 async def resource_scatterplot(
     request: Request,
     resource_id: int,
-    context: AnacreonContext = Depends(anacreon_context),
+    context: AnacreonClientWrapper = Depends(anacreon_context),
 ) -> Response:
     plot = create_resource_scatterplot(context, resource_id)
 

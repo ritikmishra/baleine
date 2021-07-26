@@ -4,14 +4,15 @@ from pprint import pprint
 from typing import List, Protocol, Union, Set
 
 from anacreonlib.types.request_datatypes import TransferFleetRequest, SellFleetRequest
-from anacreonlib.types.response_datatypes import Fleet, Trait, World
+from anacreonlib.types.response_datatypes import Fleet, OwnedWorld, Trait, World
 from anacreonlib.types.scenario_info_datatypes import ScenarioInfoElement
 from anacreonlib.types.type_hints import Location
 
 from scripts import utils
-from scripts.context import AnacreonContext
 from scripts.tasks import NameOrId
 from scripts.tasks.fleet_manipulation_utils import fleet_walk, OrderedPlanetId
+
+from anacreonlib import AnacreonClientWrapper
 
 
 class HasNameAndId(Protocol):
@@ -20,7 +21,7 @@ class HasNameAndId(Protocol):
 
 
 async def sell_stockpile_of_resource(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     transport_fleet_name_or_id: NameOrId,
     resource_name_or_unid: NameOrId,
     worlds_with_stockpile_name_or_id: Set[NameOrId],
@@ -38,14 +39,18 @@ async def sell_stockpile_of_resource(
     """
 
     jumpbeacon_trait_ids = [
-        elt.id for elt in context.game_info.scenario_info if elt.is_jump_beacon and elt.id is not None
+        elt.id
+        for elt in context.game_info.scenario_info
+        if elt.is_jump_beacon and elt.id is not None
     ]
 
     our_jump_beacon_worlds = [
         world
-        for world in context.our_worlds
-        if any(
-            (trait := world.squashed_trait_dict.get(jumpbeacon_trait_id, None)) is not None
+        for world in context.space_objects.values()
+        if isinstance(world, OwnedWorld)
+        and any(
+            (trait := world.squashed_trait_dict.get(jumpbeacon_trait_id, None))
+            is not None
             and (not isinstance(trait, Trait) or trait.build_complete is None)
             for jumpbeacon_trait_id in jumpbeacon_trait_ids
         )
@@ -62,13 +67,13 @@ async def sell_stockpile_of_resource(
         name_id_set: Set[NameOrId],
     ) -> List[Union[Fleet, World]]:
         if all(isinstance(fleet, int) for fleet in name_id_set):
-            return [context.state_dict[obj_id] for obj_id in name_id_set]
+            return [context.space_objects[int(obj_id)] for obj_id in name_id_set]
         else:
-            return [obj for obj in context.state if matches(obj, name_id_set)]
+            return [obj for obj in context.space_objects.values() if matches(obj, name_id_set)]
 
     transport_fleet_id: int = next(
         fleet.id
-        for fleet in context.state
+        for fleet in context.space_objects.values()
         if isinstance(fleet, Fleet)
         and transport_fleet_name_or_id in {fleet.name, fleet.id}
     )
@@ -82,6 +87,7 @@ async def sell_stockpile_of_resource(
         for el in context.game_info.scenario_info
         if resource_name_or_unid in {el.unid, el.id}
     )
+    assert resource_elem.id is not None
 
     assert resource_elem.is_cargo and resource_elem.mass
 
@@ -94,13 +100,16 @@ async def sell_stockpile_of_resource(
         if el.name is not None and "mesophon" in el.name.lower()
     )
 
+    # Queue of worlds that have a stockpile on them
     world_queue: "asyncio.Queue[OrderedPlanetId]" = asyncio.PriorityQueue()
     for world in worlds_with_stockpile:
+        assert world.resources is not None
         amount_of_resource_on_world = dict(utils.flat_list_to_tuples(world.resources))[
             resource_elem.id
         ]
         world_queue.put_nowait(OrderedPlanetId(-amount_of_resource_on_world, world.id))
 
+    # Queue of worlds to send the fleet to
     destination_queue: "asyncio.Queue[OrderedPlanetId]" = asyncio.Queue()
     destination_queue.put_nowait(OrderedPlanetId(None, world_queue.get_nowait().id))
 
@@ -108,13 +117,16 @@ async def sell_stockpile_of_resource(
         return min(
             (
                 world
-                for world in context.state
+                for world in context.space_objects.values()
                 if isinstance(world, World)
                 and world.sovereign_id == int(mesophon_sov_id)
                 and utils.trait_inherits_from_trait(
                     context.game_info.scenario_info, world.designation, 289
                 )
-                and any(utils.dist(world.pos, jumpbeacon.pos) < 250 for jumpbeacon in our_jump_beacon_worlds)
+                and any(
+                    utils.dist(world.pos, jumpbeacon.pos) < 250
+                    for jumpbeacon in our_jump_beacon_worlds
+                )
             ),
             key=lambda w: utils.dist(pos, w.pos),
         )
@@ -127,7 +139,7 @@ async def sell_stockpile_of_resource(
     )
 
     async for world_after_arrival in walk:
-        if world_after_arrival.sovereign_id == int(context.base_request.sovereign_id):
+        if world_after_arrival.sovereign_id == int(context._auth_info.sovereign_id):
             # remember to go to mesophon next
             destination_queue.put_nowait(
                 OrderedPlanetId(None, find_nearest_mesophon(world_after_arrival.pos).id)
@@ -158,35 +170,23 @@ async def sell_stockpile_of_resource(
             logger.info(
                 f"Putting {qty_to_carry:,} units of {resource_elem.name_desc} in fleet cargo hold"
             )
-            partial_state = await context.client.transfer_fleet(
-                TransferFleetRequest(
-                    fleet_obj_id=transport_fleet_id,
-                    dest_obj_id=world_after_arrival.id,
-                    resources=[resource_elem.id, qty_to_carry],
-                    **context.auth,
-                )
-            )
-            context.register_response(partial_state)
+            await context.transfer_fleet(transport_fleet_id, world_after_arrival.id, [resource_elem.id, qty_to_carry])
 
         elif world_after_arrival.sovereign_id == int(mesophon_sov_id):
             # sell the resource
             qty_in_fleet = dict(
                 utils.flat_list_to_tuples(
-                    context.get_obj_by_id(transport_fleet_id).resources
+                    context.space_objects[transport_fleet_id].resources
                 )
             )[resource_elem.id]
 
             logger.info(f"Selling {qty_in_fleet:,} units of {resource_elem.name_desc}")
 
-            partial_state = await context.client.sell_fleet(
-                SellFleetRequest(
+            await context.sell_fleet(
                     fleet_id=transport_fleet_id,
                     buyer_obj_id=world_after_arrival.id,
                     resources=[resource_elem.id, qty_in_fleet],
-                    **context.auth,
-                )
             )
-            context.register_response(partial_state)
 
         else:
             logger.error(

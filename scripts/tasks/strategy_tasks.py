@@ -8,12 +8,11 @@ from typing import Any, Dict, Tuple, Optional, List, Union, NewType
 from anacreonlib.types.response_datatypes import OwnedWorld, World
 
 from scripts import utils
-from scripts.context import AnacreonContext
-
+from anacreonlib import AnacreonClientWrapper
 
 BLocation = NewType("BLocation", Location)
 
-def find_sec_cap_candidates(context: AnacreonContext, ideal_dist: float = 432, angle_increment: float = math.pi / 3) -> List[World]:
+def find_sec_cap_candidates(context: AnacreonClientWrapper, ideal_dist: float = 432, angle_increment: float = math.pi / 3) -> List[World]:
     logger = logging.getLogger("Sector Capital Search v2")
 
     # Working with two bases here
@@ -30,7 +29,7 @@ def find_sec_cap_candidates(context: AnacreonContext, ideal_dist: float = 432, a
     atob = np.linalg.inv(btoa)
 
     our_worlds = [world
-        for world in context.state
+        for world in context.space_objects.values()
         if isinstance(world, OwnedWorld)]
     
     capital = next(world for world in our_worlds if context.scenario_info_objects[world.designation].role == "imperialCapital")
@@ -60,7 +59,7 @@ def find_sec_cap_candidates(context: AnacreonContext, ideal_dist: float = 432, a
 
     eligible_worlds = [
         world
-        for world in context.state
+        for world in context.space_objects.values()
         if isinstance(world, World)
         and world.tech_level >= 5
         and world.sovereign_id == 1
@@ -70,7 +69,7 @@ def find_sec_cap_candidates(context: AnacreonContext, ideal_dist: float = 432, a
 
     bests: Dict[BLocation, Tuple[float, World]] = {}
 
-    for world in (w for w in context.state if isinstance(w, World) and w.tech_level >= 5):
+    for world in (w for w in context.space_objects.values() if isinstance(w, World) and w.tech_level >= 5):
         b_pos = to_triangle_grid_coords(world.pos)
         nearest_int_coords: BLocation = BLocation((round(b_pos[0]), round(b_pos[1])))
 

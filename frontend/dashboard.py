@@ -3,8 +3,8 @@ import asyncio
 import logging
 import logging.handlers
 
+from anacreonlib import AnacreonClientWrapper
 from fastapi.param_functions import Depends
-from scripts.context import AnacreonContext
 from typing import Any, AsyncGenerator, Callable, Coroutine, List, Optional, Tuple, cast
 
 from fastapi import Request, Response, HTTPException
@@ -118,7 +118,7 @@ def dashboard(request: Request) -> Response:
 @router.post("/api/run_task/{action_idx}", name="run_task", status_code=204)
 async def run_anacreon_task(
     action_idx: int,
-    context: AnacreonContext = Depends(anacreon_context),
+    context: AnacreonClientWrapper = Depends(anacreon_context),
 ) -> None:
     dashboard_func = dashboard_functions[action_idx]
 

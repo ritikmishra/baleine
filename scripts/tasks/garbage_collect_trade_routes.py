@@ -1,20 +1,17 @@
-from dataclasses import astuple
 import logging
-from pprint import pprint
 
-from anacreonlib.types.request_datatypes import StopTradeRouteRequest
+from anacreonlib import AnacreonClientWrapper
 from scripts.tasks.balance_trade_routes import PlanetPair
 from typing import List, Set, Union
 from scripts import utils
 from anacreonlib.types.response_datatypes import OwnedWorld, TradeRoute
-from scripts.context import AnacreonContext
 
 
-async def garbage_collect_trade_routes(context: AnacreonContext) -> None:
+async def garbage_collect_trade_routes(context: AnacreonClientWrapper) -> None:
     logger = logging.getLogger("garbage_trade_routes")
 
     our_worlds = {
-        world.id: world for world in context.state if isinstance(world, OwnedWorld)
+        world.id: world for world in context.space_objects.values() if isinstance(world, OwnedWorld)
     }
 
     garbage_trade_routes: Set[PlanetPair] = set()
@@ -36,16 +33,11 @@ async def garbage_collect_trade_routes(context: AnacreonContext) -> None:
                     garbage_trade_routes.add(pair)
 
     for i, pair in enumerate(garbage_trade_routes):
-        req = StopTradeRouteRequest(
-            planet_id_a=pair.src, planet_id_b=pair.dst, **context.auth
-        )
-
         logger.info(
             f"({i + 1} of {len(garbage_trade_routes)}) Cancelling trade route for planet pair {pair}"
         )
 
-        partial_state = await context.client.stop_trade_route(req)
-        context.register_response(partial_state)
+        await context.stop_trade_route(pair.src, pair.dst)
 
 
 def is_trade_route_garbage(route: TradeRoute) -> bool:

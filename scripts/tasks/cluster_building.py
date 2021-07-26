@@ -15,13 +15,13 @@ from anacreonlib.types.request_datatypes import (
     TradeRouteTypes,
     StopTradeRouteRequest,
 )
+from anacreonlib.client_wrapper import AnacreonClientWrapper, ProductionInfo
 from anacreonlib.types.response_datatypes import World, Trait, OwnedWorld, TradeRoute
 from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfoElement
 from anacreonlib.types.type_hints import TechLevel, Location
 from rx.operators import first
 
 from scripts import utils
-from scripts.context import AnacreonContext, ProductionInfo
 from scripts.utils import TermColors
 
 
@@ -101,7 +101,7 @@ TL_8_WORLD_CLASSES = {
 
 
 def get_preferred_resource_desig(
-    context: AnacreonContext, world: World
+    context: AnacreonClientWrapper, world: World
 ) -> Optional[int]:
     """
     If this planet is abundant in any resources, recommend that it is designated as a
@@ -120,7 +120,7 @@ def get_preferred_resource_desig(
     )
 
 
-def find_best_foundation_world(context: AnacreonContext) -> List[Tuple[int, int]]:
+def find_best_foundation_world(context: AnacreonClientWrapper) -> List[Tuple[int, int]]:
     """
     Find the world which is in trading distance range to the highest number of our planets
 
@@ -133,7 +133,9 @@ def find_best_foundation_world(context: AnacreonContext) -> List[Tuple[int, int]
     )
 
     our_worlds = {
-        world.id: world for world in context.state if isinstance(world, OwnedWorld)
+        world.id: world
+        for world in context.space_objects.values()
+        if isinstance(world, OwnedWorld)
     }
 
     fnd_worlds = {
@@ -166,7 +168,7 @@ def find_best_foundation_world(context: AnacreonContext) -> List[Tuple[int, int]
     return sorted(world_counts.items(), key=lambda wc: wc[1], reverse=True)
 
 
-async def designate_low_tl_worlds(context: AnacreonContext) -> None:
+async def designate_low_tl_worlds(context: AnacreonClientWrapper) -> None:
     """
     Goes through all of our worlds and designates them if they are undesignated and low tech level
     :param context:
@@ -174,16 +176,16 @@ async def designate_low_tl_worlds(context: AnacreonContext) -> None:
     """
     logger = logging.getLogger("Designate low TL worlds")
 
-    autonomous_desig_id: int = context.get_scn_info_el_unid(
+    autonomous_desig_id: int = context.game_info.find_by_unid(
         "core.autonomousDesignation"
     ).id
-    cgaf_desig_id: int = context.get_scn_info_el_unid(
+    cgaf_desig_id: int = context.game_info.find_by_unid(
         "core.consumerGoodsDesignation"
     ).id
 
     worlds_to_designate: List[OwnedWorld] = [
         world
-        for world in context.state
+        for world in context.space_objects.values()
         if isinstance(world, OwnedWorld)
         and world.tech_level < 5
         and world.designation == autonomous_desig_id
@@ -199,14 +201,7 @@ async def designate_low_tl_worlds(context: AnacreonContext) -> None:
             logger.info(
                 f"going to designate {world.name} (id {world.id}) as desig id {preferred_desig}"
             )
-            partial_state = await context.client.designate_world(
-                DesignateWorldRequest(
-                    source_obj_id=world.id,
-                    new_designation=preferred_desig,
-                    **context.auth,
-                )
-            )
-            context.register_response(partial_state)
+            await context.designate_world(world.id, preferred_desig)
         except HexArcException as e:
             logger.error(
                 f"Encountered exception trying to designate world name `{world.name}` id {world.id}"
@@ -215,17 +210,17 @@ async def designate_low_tl_worlds(context: AnacreonContext) -> None:
 
 
 async def build_cluster(
-    context: AnacreonContext, center_world_id: int, radius: float = 200
-):
+    context: AnacreonClientWrapper, center_world_id: int, radius: float = 200
+) -> None:
     logger = logging.getLogger("cluster builder")
 
-    worlds = [world for world in context.state if isinstance(world, World)]
+    worlds = [world for world in context.space_objects.values() if isinstance(world, World)]
     center_world = next(world for world in worlds if world.id == center_world_id)
     worlds_in_cluster = [
         world
         for world in worlds
         if (
-            world.sovereign_id == int(context.base_request.sovereign_id)
+            isinstance(world, OwnedWorld)
             and utils.dist(world.pos, center_world.pos) <= radius
         )
     ]
@@ -238,42 +233,29 @@ async def build_cluster(
         extractor_desig_id = get_preferred_resource_desig(context, world)
         if extractor_desig_id is not None and world.designation != extractor_desig_id:
             try:
-                req = DesignateWorldRequest(
-                    source_obj_id=world.id,
-                    new_designation=extractor_desig_id,
-                    **context.auth,
-                )
-                partial_state = await context.client.designate_world(req)
+                await context.designate_world(world.id, extractor_desig_id)
                 logger.info(
                     f"Designated {world.name} (id {world.id}) as resource extractor"
                 )
             except HexArcException:
-                req = RenameObjectRequest(
-                    obj_id=world.id,
-                    name=f"{world.id} future extractor {extractor_desig_id}",
-                    **context.auth,
-                )
-                partial_state = await context.client.rename_object(req)
+                await context.rename_object(world.id, f"{world.id} future extractor {extractor_desig_id}")
                 logger.info(
                     f"Marked {world.name} (id {world.id}) as resource extractor"
                 )
-            context.register_response(partial_state or [])
 
 
 async def connect_worlds_to_fnd(
-    context: AnacreonContext, fnd_id: int, worlds: Optional[List[World]] = None
-):
+    context: AnacreonClientWrapper, fnd_id: int, worlds: Optional[List[World]] = None
+) -> None:
     logger = logging.getLogger(f"connect foundation id {fnd_id}")
 
-    fnd_world = next(
-        world
-        for world in context.state
-        if isinstance(world, OwnedWorld) and world.id == fnd_id
-    )
+    fnd_world = context.space_objects[fnd_id]
+    assert isinstance(fnd_world, OwnedWorld)
+
     if worlds is None:
         worlds = [
             world
-            for world in context.state
+            for world in context.space_objects.values()
             if isinstance(world, OwnedWorld)
             and utils.dist(world.pos, fnd_world.pos) <= 200
             and world.id != fnd_id
@@ -291,21 +273,13 @@ async def connect_worlds_to_fnd(
             for tl_8_class in TL_8_WORLD_CLASSES
         )
         tech_level = 8 if planet_can_build_planetary_arcology else 7
-        req = SetTradeRouteRequest(
+        logger.info(f"Importing TL {tech_level} to world {world.name} (id {world.id})")
+        await context.set_trade_route(
             importer_id=world.id,
             exporter_id=fnd_id,
             alloc_type=TradeRouteTypes.TECH,
-            alloc_value=str(tech_level),
-            **context.auth,
+            alloc_value=str(tech_level)
         )
-        logger.info(f"Importing TL {tech_level} to world {world.name} (id {world.id})")
-        print(req.json(by_alias=True))
-        partial_state = await context.client.set_trade_route(req)
-        # except HexArcException as e:
-        #     logger.error(str(e))
-        # else:
-        #     print(partial_state)
-        context.register_response(partial_state or [])
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -331,11 +305,11 @@ class NeedsProvidesInfo:
 
 
 async def calculate_resource_deficit(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     *,
     exports_only: bool = True,
     predicate: Optional[Callable[[OwnedWorld], bool]] = None,
-):
+) -> None:
     """
     Print out aggregated resource production info across all of our worlds
 
@@ -349,12 +323,12 @@ async def calculate_resource_deficit(
         lambda: ProductionInfo()
     )
 
-    if len(context.state) == 0:
-        await context.any_update_observable.pipe(first())
+    if len(context.space_objects) == 0:
+        await context.wait_for_any_update()
 
-    our_worlds = [world for world in context.state if isinstance(world, OwnedWorld)]
+    our_worlds = [world for world in context.space_objects.values() if isinstance(world, OwnedWorld)]
     if predicate is not None:
-        our_worlds = [world for world in context.state if predicate(world)]
+        our_worlds = [world for world in our_worlds if predicate(world)]
 
     for world in our_worlds:
         exports = None
@@ -390,7 +364,7 @@ async def calculate_resource_deficit(
         f"{TermColors.BOLD}{row_fstr.format('res_name', 'surplus', 'sustainability', 'stockpile', color=TermColors.OKGREEN)}{TermColors.ENDC}"
     )
     for res_id, prod_info in aggregate_prod_info.items():
-        res_name = context.get_scn_info_el_name(res_id)
+        res_name = context.scenario_info_objects[res_id].name
         surplus = prod_info.produced - prod_info.consumed
         if exports_only:
             surplus -= prod_info.exported

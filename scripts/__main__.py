@@ -1,7 +1,10 @@
 import asyncio
 from asyncio.tasks import Task
+from anacreonlib import AnacreonClientWrapper
 import logging
 from pprint import pprint
+from scripts.tasks.transportation_tasks import sell_stockpile_of_resource
+from scripts.tasks.rally import rally_ships_to_world_id
 from scripts.tasks.strategy_tasks import find_sec_cap_candidates
 from scripts.tasks.garbage_collect_trade_routes import garbage_collect_trade_routes
 from scripts.tasks.balance_trade_routes import balance_trade_routes
@@ -11,7 +14,6 @@ from anacreonlib.types.request_datatypes import AnacreonApiRequest
 from rx.operators import first, take
 
 from scripts import utils, filters
-from scripts.context import AnacreonContext
 from scripts.tasks import conquest_tasks, cluster_building
 from scripts.tasks.cluster_building import (
     calculate_resource_deficit,
@@ -19,7 +21,12 @@ from scripts.tasks.cluster_building import (
     find_best_foundation_world,
 )
 from scripts.tasks.improvement_related_tasks import build_habitats_spaceports
-from scripts.tasks.simple_tasks import dump_scn_to_json, dump_state_to_json, scout_around_planet
+from scripts.tasks.simple_tasks import (
+    dump_scn_to_json,
+    dump_state_to_json,
+    scout_around_planet,
+    zero_out_defense_structure_allocation,
+)
 from scripts.utils import TermColors
 
 try:
@@ -40,7 +47,8 @@ async def main() -> None:
     futures: List[Awaitable[None]] = []
     daemon_tasks: List[Task[None]] = []
 
-    context = await AnacreonContext.create(AnacreonApiRequest(**auth))
+    context = await AnacreonClientWrapper.from_auth_token(GAME_ID, ACCESS_TOKEN)
+
     try:
 
         async def on_every_watch() -> None:
@@ -68,54 +76,101 @@ async def main() -> None:
         daemon_tasks.append(asyncio.create_task(on_every_watch()))
         daemon_tasks.append(asyncio.create_task(every_hour()))
         daemon_tasks.append(asyncio.create_task(every_40_mins()))
-        daemon_tasks.append(asyncio.create_task(context.periodically_update_objects()))
+        daemon_tasks.append(context.call_get_objects_periodically())
 
         logger.info("Waiting to get objects")
-        full_state = await context.watch_update_observable.pipe(first())
+        await context.wait_for_get_objects()
         logger.info("Got objects!")
 
-        find_sec_cap_candidates(context)
+        ##//
+
+        # hex_res_id = context.get_scn_info_el_unid("core.hexacarbide").id
+        # assert hex_res_id is not None
+        # worlds_with_hex = {
+        #     world.id
+        #     for world in context.our_worlds
+        #     if world.resource_dict.get(hex_res_id, 0) > 5000
+        # }
+
+        # print(worlds_with_hex)
+
+        # await sell_stockpile_of_resource(
+        #     context, "hex haulers", hex_res_id, worlds_with_hex
+        # )
+
+        ##//
+
+        # await zero_out_defense_structure_allocation(context)
+        # await rally_ships_to_world_id(context, 170, None, 1111)
+
+        # find_sec_cap_candidates(context)
 
         # await cluster_building.calculate_resource_deficit(context, exports_only=True)
 
         # balance trade routes
         # await balance_trade_routes(context)
+        # await garbage_collect_trade_routes(context)
 
         ## Find a new foundation world
         # logger.info(f"The best foundation world ids are")
         # pprint(find_best_foundation_world(context))
 
-        # await scout_around_planet(context,
-        #                           center_world_id=(await find_next_sector_capital_worlds(context))[0].id,
-        #                           radius=250,
-        #                           resource_dict={101: 2},
-        #                           source_obj_id=99
-        #                           )
+        await scout_around_planet(
+            context,
+            center_world_id=155,
+            radius=250,
+            resource_dict={101: 2},
+            source_obj_id=5104,
+        )
 
         ## Sell a stockpile of resources to the mesophons
         # futures.append(asyncio.create_task(sell_stockpile_of_resource(context, "shuttle", "core.hexacarbide",
         #                                                               {"BR 1405 (hex)", "Lesser Nishapur (hex)"})))
 
         ## Connect worlds to a foundation
-        # await connect_worlds_to_fnd(context, 1322)
+        # await connect_worlds_to_fnd(context, 264)
+        # await connect_worlds_to_fnd(context, 692)
 
         # futures.append(asyncio.create_task(asyncio.sleep(8 * 3600)))
 
         ## Attack worlds around center world
-        # futures.append(asyncio.create_task(
-        #     conquest_tasks.conquer_independents_around_id(context,
-        #                                                   {"Alpha Corvi One"},
-        #                                                   generic_hammer_fleets={"hammer 1", "hammer 2"},
-        #                                                   nail_fleets={"nail", "nail 2", "nail 3"},
-        #                                                   anti_missile_hammer_fleets={"turtle"})
-        # ))
+        # futures.append(
+        #     asyncio.create_task(
+        #         conquest_tasks.conquer_independents_around_id(
+        #             context,
+        #             {"Eta Ophiuchii Seven", "Signal"},
+        #             generic_hammer_fleets={
+        #                 "hammer 1",
+        #                 "hammer 2",
+        #                 "hammer 3",
+        #                 "hammer 4",
+        #                 "hammer 5",
+        #                 "hammer 6",
+        #             },
+        #             nail_fleets={
+        #                 "nail",
+        #                 "nail 2",
+        #                 "nail 3",
+        #                 "nail 4",
+        #                 "nail 5",
+        #                 "nail 6",
+        #                 "nail 7",
+        #                 "nail 8",
+        #                 "nail 9",
+        #                 "nail 10",
+        #             },
+        #             anti_missile_hammer_fleets={"ehammer 1", "ehammer 2"},
+        #         )
+        #     )
+        # )
 
         ## Scan the galaxy
         # fleet_names = ("roomba","roomba2","roomba3","roomba4","roomba5","roomba6")
         # futures.extend(asyncio.create_task(explore_unexplored_regions(context, fleet_name)) for fleet_name in fleet_names)
 
         ## Send scout ships
-        # await scout_around_planet(context, center_world_id=3230, source_obj_id=4651)
+        # await scout_around_planet(context, center_world_id=4926, source_obj_id=4651)
+        # await scout_around_planet(context, center_world_id=1175, source_obj_id=4651)
 
         dump_state_to_json(context)
         await dump_scn_to_json(context)

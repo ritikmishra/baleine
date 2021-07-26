@@ -1,8 +1,9 @@
 import asyncio
 import functools
 import logging
-from pprint import pprint
 from dataclasses import replace, dataclass
+
+from anacreonlib.client_wrapper import AnacreonClientWrapper, ProductionInfo
 from scripts import utils
 import anacreonlib.exceptions
 from anacreonlib.types.type_hints import Location
@@ -16,10 +17,9 @@ from typing import (
     Union,
 )
 
-from anacreonlib.types.request_datatypes import SetTradeRouteRequest, TradeRouteTypes
-from anacreonlib.types.response_datatypes import OwnedWorld, TradeRoute
+from anacreonlib.types.request_datatypes import TradeRouteTypes
+from anacreonlib.types.response_datatypes import OwnedWorld
 
-from scripts.context import AnacreonContext, ProductionInfo
 
 WorldFilter = Callable[[OwnedWorld], bool]
 
@@ -74,7 +74,7 @@ class PlanetPair:
 
 
 async def balance_trade_routes(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     filter: WorldFilter = lambda w: True,
     dry_run: bool = False,
 ) -> None:
@@ -87,7 +87,7 @@ async def balance_trade_routes(
 
     our_worlds: Dict[int, OwnedWorld] = {
         world.id: world
-        for world in context.state
+        for world in context.space_objects.values()
         if isinstance(world, OwnedWorld) and filter(world)
     }
 
@@ -115,9 +115,16 @@ async def balance_trade_routes(
             context, our_worlds, resource_id, dry_run=dry_run
         )
 
+@dataclass
+class TradeRouteInfo:
+    importer_id: int
+    exporter_id: int
+    alloc_type: str
+    alloc_value: float
+    res_id: int
 
 async def balance_routes_for_one_resource(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     our_worlds: Dict[int, OwnedWorld],
     resource_id: int,
     dry_run: bool = False,
@@ -243,7 +250,7 @@ async def balance_routes_for_one_resource(
         importer_worlds, exporter_worlds, position_dict, graph_edges
     )
 
-    requests = compile_graph_edge_changes(
+    requests: List[TradeRouteInfo] = compile_graph_edge_changes(
         context, resource_id, importer_worlds, graph_edges, new_edges
     )
 
@@ -260,13 +267,17 @@ async def balance_routes_for_one_resource(
         if not dry_run:
             try:
                 await asyncio.sleep(1)
-                res = await context.client.set_trade_route(req)
+                await context.set_trade_route(
+                    importer_id=req.importer_id,
+                    exporter_id=req.exporter_id,
+                    alloc_type=req.alloc_type,
+                    alloc_value=req.alloc_value,
+                    res_type_id=req.res_id
+                )
             except asyncio.exceptions.TimeoutError:
                 requests.append(req)
             except anacreonlib.exceptions.HexArcException:
                 pass
-            else:
-                context.register_response(res)
 
 
 def bootstrap_graph_edges(
@@ -551,31 +562,30 @@ def adjust_graph_edges(
 
 
 def compile_graph_edge_changes(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     resource_id: int,
     importers: Dict[int, ResourceImporterGraphNode],
     old_graph_edges: Dict[PlanetPair, ResourceGraphEdge],
     new_graph_edges: Dict[PlanetPair, ResourceGraphEdge],
-) -> List[SetTradeRouteRequest]:
+) -> List[TradeRouteInfo]:
     """Turns changes in the import graph for one resource into request bodies that can then be sent to the Anacreon API
 
     Args:
-        context (AnacreonContext): context (used only for context.auth)
+        context (AnacreonClientWrapper): context (used only for context.auth)
         resource_id (int): Resource ID for which the graph edges represent trading
         importers (Dict[int, ResourceImporterGraphNode]): A dict of all importer planets on the trade graph
         old_graph_edges (Dict[PlanetPair, ResourceGraphEdge]): The trage graph that currently exists
         new_graph_edges (Dict[PlanetPair, ResourceGraphEdge]): The trade graph that we would like to switch to
 
     Returns:
-        List[SetTradeRouteRequest]: All the trade route changes that need to be made in order to apply the new edges
+        List[TradeRouteInfo]: All the trade route changes that need to be made in order to apply the new edges
     """
     logger = logging.getLogger("apply_graph_edge_changes")
 
     create_trade_route_request = functools.partial(
-        SetTradeRouteRequest,
+        TradeRouteInfo,
         alloc_type=TradeRouteTypes.CONSUMPTION,
         res_type_id=resource_id,
-        **context.auth,
     )
 
     edges_to_delete: Set[PlanetPair] = set()
@@ -593,7 +603,7 @@ def compile_graph_edge_changes(
         if edge_is_new or edge_modifies_old_edge:
             edges_to_add_or_modify[pair] = edge
 
-    requests: List[SetTradeRouteRequest] = []
+    requests: List[TradeRouteInfo] = []
     for edge_to_delete in edges_to_delete:
         requests.append(
             create_trade_route_request(

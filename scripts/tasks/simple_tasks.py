@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum, IntEnum, auto
 import pathlib
 from contextlib import suppress
@@ -5,29 +6,24 @@ import asyncio
 import functools
 import json
 import logging
-from typing import List, Callable, Dict, Optional, Tuple
+from typing import Iterable, List, Callable, Dict, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from anacreonlib.types.request_datatypes import (
-    SetFleetDestinationRequest,
-    DeployFleetRequest,
-    SetIndustryAllocRequest,
-)
 from anacreonlib.types.response_datatypes import (
     Fleet,
+    OwnSovereign,
     OwnedWorld,
-    ReigningSovereign,
     Trait,
     World,
     AnacreonObject,
 )
+from anacreonlib import AnacreonClientWrapper
 from anacreonlib.types.type_hints import Location
 from anacreonlib.types.scenario_info_datatypes import Category, Role, ScenarioInfo
 import anacreonlib.exceptions
 from rx.operators import first
 
-from scripts.context import AnacreonContext
 from scripts.creds import SOV_ID
 from scripts.utils import flat_list_to_tuples, dist, dict_to_flat_list, world_has_trait
 
@@ -49,8 +45,8 @@ def _exploration_outline_to_points(outline: List[List[float]]) -> List[Location]
     return flat_list_to_tuples(flattened)
 
 
-async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str) -> None:
-    def find_fleet(objects: List[AnacreonObject]) -> Fleet:
+async def explore_unexplored_regions(context: AnacreonClientWrapper, fleet_name: str) -> None:
+    def find_fleet(objects: Iterable[AnacreonObject]) -> Fleet:
         return next(
             obj
             for obj in objects
@@ -64,14 +60,14 @@ async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str) 
     number_of_visits_to_ban_candidate = 0
 
     while True:
-        our_sovereign: ReigningSovereign = next(
+        our_sovereign: OwnSovereign = next(
             obj
-            for obj in context.state
-            if isinstance(obj, ReigningSovereign) and obj.id == SOV_ID
+            for obj in context.sovereigns.values()
+            if isinstance(obj, OwnSovereign) and obj.id == SOV_ID
         )
 
-        current_fleet: Fleet = find_fleet(context.state)
-        current_fleet_pos = current_fleet.position
+        current_fleet: Fleet = find_fleet(context.space_objects.values())
+        current_fleet_pos = current_fleet.pos
         logger.info(f"Fleet currently at {current_fleet_pos}")
 
         assert our_sovereign.exploration_grid is not None
@@ -83,9 +79,9 @@ async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str) 
             our_border, key=functools.partial(dist, current_fleet_pos)
         )
 
-        worlds = iter(
+        worlds = (
             obj
-            for obj in context.state
+            for obj in context.space_objects.values()
             if isinstance(obj, World) and obj.id not in banned_world_ids
         )
         nearest_planet_to_target: World = min(
@@ -104,27 +100,20 @@ async def explore_unexplored_regions(context: AnacreonContext, fleet_name: str) 
         logger.info(f"Fleet decided to go to planet {nearest_planet_to_target.name}")
 
         # send the fleet + refresh data
-        new_resp = await context.client.set_fleet_destination(
-            SetFleetDestinationRequest(
-                obj_id=current_fleet.id,
-                dest=nearest_planet_to_target.id,
-                **context.auth,
-            )
-        )
-        context.register_response(new_resp)
+        await context.set_fleet_destination(current_fleet.id, nearest_planet_to_target.id)
         banned_world_ids.add(nearest_planet_to_target.id)
 
         logger.info(f"Sent fleet, waiting for the next watch to update")
-        await context.watch_update_observable.pipe(first())
+        await context.wait_for_get_objects()
         logger.info(f"New watch, lets see what happened")
 
 
-async def graph_exploration_boundary(context: AnacreonContext) -> None:
+async def graph_exploration_boundary(context: AnacreonClientWrapper) -> None:
     logger = logging.getLogger("exploration boundary grapher")
     our_sovereign = next(
         obj
-        for obj in context.state
-        if isinstance(obj, ReigningSovereign) and obj.id == SOV_ID
+        for obj in context.sovereigns.values()
+        if isinstance(obj, OwnSovereign) and obj.id == SOV_ID
     )
 
     assert our_sovereign.exploration_grid is not None
@@ -156,14 +145,20 @@ def _ensure_filename_exists(filename: str) -> None:
 
 
 def dump_state_to_json(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     state_subset: Optional[List[AnacreonObject]] = None,
     filename: str = "out/objects.json",
 ) -> None:
     logger = logging.getLogger("dump context state")
 
     if state_subset is None:
-        state_subset = context.state
+        state_subset = [
+            *context.space_objects.values(),
+            *context.sieges.values(),
+            *context.sovereigns.values(),
+        ]
+        if context.update_obj is not None:
+            state_subset.append(context.update_obj)
 
     just_raw_objects = [obj for obj in state_subset if isinstance(obj, dict)]
 
@@ -181,20 +176,18 @@ def dump_state_to_json(
     with open(filename, "w") as f:
         json.dump(all_raw_objects, f, indent=4)
 
-    with open("out/could_not_deserialize.json", "w") as f:
+    with open("out/could_not_deserialize.json", "a") as f:
         json.dump([obj for obj in state_subset if isinstance(obj, dict)], f, indent=4)
     logger.info("state dump complete!")
 
 
 async def dump_scn_to_json(
-    context: AnacreonContext, filename: str = "out/scn_info.json"
+    context: AnacreonClientWrapper, filename: str = "out/scn_info.json"
 ) -> None:
     logger = logging.getLogger("dump scn info")
 
     logger.info("getting scenario info")
-    scn_info: ScenarioInfo = await context.client.get_game_info(
-        context.base_request.auth_token, context.base_request.game_id
-    )
+    scn_info: ScenarioInfo = context.game_info
     logger.info("retrieved scnn info!")
 
     _ensure_filename_exists(filename)
@@ -205,7 +198,7 @@ async def dump_scn_to_json(
 
 
 async def send_fleet_to_worlds_meeting_predicate(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     source_obj_id: int,
     resources: Dict[int, int],
     predicate: Callable[[World], bool],
@@ -217,43 +210,27 @@ async def send_fleet_to_worlds_meeting_predicate(
 
     worlds_to_send_fleet_to = [
         world
-        for world in context.state
+        for world in context.space_objects.values()
         if isinstance(world, World) and predicate(world)
     ]
     for world in worlds_to_send_fleet_to:
-        partial_state = await context.client.deploy_fleet(
-            DeployFleetRequest(
-                source_obj_id=source_obj_id,
-                resources=dict_to_flat_list(resources),
-                **context.base_request.dict(by_alias=True),
-            )
-        )
+        newest_fleet = await context.deploy_fleet(source_obj_id, resources)
+        assert newest_fleet is not None, "Could not find newest fleet??"
 
-        newest_fleet = max(
-            (fleet for fleet in partial_state if isinstance(fleet, Fleet)),
-            key=lambda f: f.id,
-        )
         logger.info(
             f"Deployed fleet (name = '{newest_fleet.name}') (id = '{newest_fleet.id}')!"
         )
-        context.register_response(partial_state)
 
-        partial_state = await context.client.set_fleet_destination(
-            SetFleetDestinationRequest(
-                obj_id=newest_fleet.id,
-                dest=world.id,
-                **context.base_request.dict(by_alias=True),
-            )
-        )
+        await context.set_fleet_destination(newest_fleet.id, world.id)
+
         logger.info(
             f"Sent fleet id {newest_fleet.id} to planet (name = '{world.name}') (id = '{world.id}')"
         )
-        context.register_response(partial_state)
         await asyncio.sleep(3)
 
 
 async def scout_around_planet(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     center_world_id: int,
     radius: float = 200,
     *,
@@ -261,9 +238,9 @@ async def scout_around_planet(
     source_obj_id: Optional[int] = None,
 ) -> None:
     """
-    Sends fleets to all planens within a radius of the center planet
+    Sends fleets to all planets within a radius of the center planet
 
-    :param context: AnacreonContext
+    :param context: AnacreonClientWrapper
     :param center_world_id: The world that should be the center of our circle
     :param radius: The radius of the circle
     :param resource_dict: the fleet composition. defaults to 5 vanguards.
@@ -277,14 +254,10 @@ async def scout_around_planet(
     if source_obj_id is None:
         source_obj_id = center_world_id
 
-    center_world = next(
-        world
-        for world in context.state
-        if isinstance(world, World) and world.id == center_world_id
-    )
+    center = context.space_objects[center_world_id]
 
     def is_world_in_radius(world: World) -> bool:
-        return dist(world.pos, center_world.pos) < radius
+        return dist(world.pos, center.pos) < radius
 
     await send_fleet_to_worlds_meeting_predicate(
         context, source_obj_id, resource_dict, is_world_in_radius, logger=logger
@@ -298,12 +271,12 @@ class ZeroOutDefenseStructureAllocationMode(IntEnum):
 
 
 async def zero_out_defense_structure_allocation(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     mode: ZeroOutDefenseStructureAllocationMode = ZeroOutDefenseStructureAllocationMode.DESIGNATED_WORLDS,
 ) -> None:
     logger = logging.getLogger("zero_out_defense_structure_allocation")
 
-    autonomous_desig = context.get_scn_info_el_unid("core.autonomousDesignation")
+    autonomous_desig = context.game_info.find_by_unid("core.autonomousDesignation")
 
     defense_structure_ids = {
         kind.id: kind.name_desc
@@ -317,8 +290,15 @@ async def zero_out_defense_structure_allocation(
         and kind.id is not None
     }
 
-    orders: List[Tuple[str, SetIndustryAllocRequest]] = []
-    our_worlds = (world for world in context.state if isinstance(world, OwnedWorld))
+    @dataclass
+    class DeallocationOrder:
+        log_txt: str
+        world_id: int
+        structure_id: int
+
+    orders: List[DeallocationOrder] = []
+
+    our_worlds = (world for world in context.space_objects.values() if isinstance(world, OwnedWorld))
     if mode == ZeroOutDefenseStructureAllocationMode.AUTONOMOUS_WORLDS:
         worlds_to_deallocate = (
             world for world in our_worlds if world.designation == autonomous_desig.id
@@ -346,21 +326,17 @@ async def zero_out_defense_structure_allocation(
                 continue
 
             orders.append(
-                (
+                DeallocationOrder(
                     f"Deallocate [{defense_structure_ids[structure_id]}] on world [{world.name}] (id {world.id})",
-                    SetIndustryAllocRequest(
-                        world_id=world.id,
-                        industry_id=structure_id,
-                        alloc_value=0,
-                        **context.auth,
-                    ),
+                    world_id=world.id,
+                    structure_id=structure_id,
                 )
             )
 
-    for i, (info_txt, order) in enumerate(orders):
+    for i, order in enumerate(orders):
         try:
-            logger.info(f"({i + 1}/{len(orders)}) {info_txt}")
-            await context.client.set_industry_alloc(order)
+            logger.info(f"({i + 1}/{len(orders)}) {order.log_txt}")
+            await context.set_industry_alloc(order.world_id, order.structure_id, 0)
             await asyncio.sleep(2)
         except anacreonlib.exceptions.HexArcException:
             logger.error("could not complete the previous order!")

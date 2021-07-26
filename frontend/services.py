@@ -3,29 +3,26 @@
 import pathlib
 from typing import Optional
 
+from anacreonlib.client_wrapper import AnacreonClientWrapper
+
 import scripts.creds
-from anacreonlib.types.request_datatypes import AnacreonApiRequest
 from fastapi.templating import Jinja2Templates
-from scripts.context import AnacreonContext
 
 
 class AnacreonContextDependency:
     """Singleton injectable dependency for the AnacreonContext object"""
 
     def __init__(self) -> None:
-        self._context: Optional[AnacreonContext] = None
+        self._context: Optional[AnacreonClientWrapper] = None
 
-    async def __call__(self) -> AnacreonContext:
+    async def __call__(self) -> AnacreonClientWrapper:
         if self._context is None:
-            self._context = await AnacreonContext.create(
-                AnacreonApiRequest(
-                    auth_token=scripts.creds.ACCESS_TOKEN,
-                    game_id=scripts.creds.GAME_ID,
-                    sovereign_id=scripts.creds.SOV_ID,
-                )
+            self._context = await AnacreonClientWrapper.from_auth_token(
+                auth_token=scripts.creds.ACCESS_TOKEN,
+                game_id=scripts.creds.GAME_ID,
             )
 
-            await self._context.update_once()
+            await self._context.get_objects()
 
         return self._context
 

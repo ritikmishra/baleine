@@ -8,11 +8,11 @@ from asyncio import Future
 from itertools import chain
 from typing import List, Set, Union, Optional
 
+from anacreonlib.client_wrapper import AnacreonClientWrapper, MilitaryForceInfo
 from anacreonlib.types.response_datatypes import World, Fleet
 from anacreonlib.types.type_hints import BattleObjective
 
 from scripts import utils
-from scripts.context import AnacreonContext, MilitaryForces
 from scripts.tasks import NameOrId
 from scripts.tasks.fleet_manipulation_utils import OrderedPlanetId, attack_fleet_walk
 from scripts.utils import TermColors
@@ -29,14 +29,14 @@ class FleetBucket(abc.ABC):
 
     @abc.abstractmethod
     def calculate_order(
-        self, context: AnacreonContext, forces: MilitaryForces, world: World
+        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
     ) -> float:
         """Returns the priority of attacking this world for the priority queue"""
         raise NotImplementedError()
 
     @abc.abstractmethod
     def can_attack_world(
-        self, context: AnacreonContext, forces: MilitaryForces, world: World
+        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
     ) -> bool:
         """
         Determines if fleets in this bucket are allowed to attack a certain world
@@ -49,12 +49,12 @@ class FleetBucket(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def should_decommission_fleet(self, context: AnacreonContext, fleet: Fleet) -> bool:
+    def should_decommission_fleet(self, context: AnacreonClientWrapper, fleet: Fleet) -> bool:
         """Determines if this fleet can continue or not"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def pilot_fleet(self, context: AnacreonContext, fleet_id: int) -> None:
+    async def pilot_fleet(self, context: AnacreonClientWrapper, fleet_id: int) -> None:
         raise NotImplementedError()
 
 
@@ -66,30 +66,30 @@ class HammerFleetBucket(FleetBucket):
 
     def calculate_order(
         self: HammerFleetBucket,
-        context: AnacreonContext,
-        forces: MilitaryForces,
+        context: AnacreonClientWrapper,
+        forces: MilitaryForceInfo,
         world: World,
     ) -> float:
         return forces.space_forces
 
     def can_attack_world(
         self: HammerFleetBucket,
-        context: AnacreonContext,
-        forces: MilitaryForces,
+        context: AnacreonClientWrapper,
+        forces: MilitaryForceInfo,
         world: World,
     ) -> bool:
         """Determines if fleets in this bucket are allowed to attack a certain world"""
         return forces.space_forces <= self.max_space_force
 
     def should_decommission_fleet(
-        self: HammerFleetBucket, context: AnacreonContext, fleet: Fleet
+        self: HammerFleetBucket, context: AnacreonClientWrapper, fleet: Fleet
     ) -> bool:
         """Determines if this fleet can continue or not"""
-        fleet_forces = context.get_forces(fleet.resources)
+        fleet_forces = context.calculate_forces(fleet)
         return fleet_forces.space_forces < self.max_space_force
 
     async def pilot_fleet(
-        self: HammerFleetBucket, context: AnacreonContext, fleet_id: int
+        self: HammerFleetBucket, context: AnacreonClientWrapper, fleet_id: int
     ) -> None:
         logger_name = f"{self.bucket_name} Fleet Manager (fleet ID {fleet_id})"
         logger = logging.getLogger(logger_name)
@@ -105,7 +105,7 @@ class HammerFleetBucket(FleetBucket):
 
         async for world_state_after_attacked in fleet_walk_gen:
             planet_id = world_state_after_attacked.id
-            forces = context.get_forces(world_state_after_attacked.resources)
+            forces = context.calculate_forces(world_state_after_attacked.resources)
 
             if forces.space_forces <= 3:
                 logger.info(f"Probably conquered {planet_id} :)")
@@ -120,11 +120,9 @@ class HammerFleetBucket(FleetBucket):
                     f"Whatever happened on planet id {planet_id} was a failure most likely :("
                 )
 
-            this_fleet = next(
-                fleet
-                for fleet in context.state
-                if isinstance(fleet, Fleet) and fleet.id == fleet_id
-            )
+            this_fleet = context.space_objects[fleet_id]
+            assert isinstance(this_fleet, Fleet)
+
             if self.should_decommission_fleet(context, this_fleet):
                 logger.info(
                     "Deciding to decommission this fleet, presumably due to low forces"
@@ -138,7 +136,7 @@ class AntiMissileHammerFleetBucket(HammerFleetBucket):
     max_nonmissile_forces: float = 100
 
     def can_attack_world(
-        self, context: AnacreonContext, forces: MilitaryForces, world: World
+        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
     ) -> bool:
         """Determines if fleets in this bucket are allowed to attack a certain world"""
         return (
@@ -156,12 +154,12 @@ class NailFleetBucket(FleetBucket):
     output_bucket: None = None
 
     def calculate_order(
-        self, context: AnacreonContext, forces: MilitaryForces, world: World
+        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
     ) -> float:
         return forces.ground_forces
 
     def can_attack_world(
-        self, context: AnacreonContext, forces: MilitaryForces, world: World
+        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
     ) -> bool:
         """Determines if fleets in this bucket are allowed to attack a certain world"""
         return (
@@ -169,15 +167,15 @@ class NailFleetBucket(FleetBucket):
             and forces.ground_forces <= self.max_ground_force
         )
 
-    def should_decommission_fleet(self, context: AnacreonContext, fleet: Fleet) -> bool:
+    def should_decommission_fleet(self, context: AnacreonClientWrapper, fleet: Fleet) -> bool:
         """Determines if this fleet can continue or not"""
-        fleet_forces = context.get_forces(fleet.resources)
+        fleet_forces = context.calculate_forces(fleet.resources)
         return (
             fleet_forces.space_forces < 2 * self.max_space_force
             or fleet_forces.ground_forces < 2 * self.max_ground_force
         )
 
-    async def pilot_fleet(self, context: AnacreonContext, fleet_id: int) -> None:
+    async def pilot_fleet(self, context: AnacreonClientWrapper, fleet_id: int) -> None:
         logger_name = f"{self.bucket_name} Fleet Manager (fleet ID {fleet_id})"
         logger = logging.getLogger(logger_name)
 
@@ -194,15 +192,13 @@ class NailFleetBucket(FleetBucket):
             await fleet_walk_gen.asend(None)
             if (
                 world_state_after_attacked.sovereign_id
-                == context.base_request.sovereign_id
+                == context._auth_info.sovereign_id
             ):
                 logger.info(f"Conquered the planet ID {world_state_after_attacked.id}")
 
-            this_fleet = next(
-                fleet
-                for fleet in context.state
-                if isinstance(fleet, Fleet) and fleet.id == fleet_id
-            )
+            this_fleet = context.space_objects[fleet_id]
+            assert isinstance(this_fleet, Fleet)
+
             if self.should_decommission_fleet(context, this_fleet):
                 logger.info(
                     "Deciding to decommission this fleet, presumably due to low forces"
@@ -211,7 +207,7 @@ class NailFleetBucket(FleetBucket):
 
 
 async def conquer_independents_around_id(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     center_planet: Set[NameOrId],
     *,
     radius=250,
@@ -247,7 +243,7 @@ async def conquer_independents_around_id(
 
 
 async def conquer_planets(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     planets: Union[List[World], Set[NameOrId]],
     *,
     generic_hammer_fleets: Set[NameOrId],
@@ -271,7 +267,7 @@ async def conquer_planets(
 
 
 async def conquer_planets_using_buckets(
-    context: AnacreonContext,
+    context: AnacreonClientWrapper,
     planets: Union[List[World], Set[NameOrId]],
     *,
     fleet_buckets: List[FleetBucket],
@@ -327,7 +323,7 @@ async def conquer_planets_using_buckets(
     # Step 2: Sort them into queues.
     for world in planet_objects:
         if world.resources is not None:
-            force = context.get_forces(world.resources)
+            force = context.calculate_forces(world.resources)
             for i, bucket in enumerate(fleet_buckets):
                 if bucket.can_attack_world(context, force, world):
                     bucket.queue.put_nowait(

@@ -20,7 +20,7 @@ app = FastAPI()
 async def setup_periodic_update() -> None:
     context = await anacreon_context()
     # TODO: what happens to this task on application exit?
-    asyncio.create_task(context.periodically_update_objects())
+    context.call_get_objects_periodically()
 
 
 app.include_router(surplus_scatterplot_route.router)
