@@ -4,7 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-anacreonlib = {editable = true, path = "./../anacreonlib"}
+anacreonlib = ">=2.0.0"
 rx = "*"
 matplotlib = "*"
 numpy = "*"
