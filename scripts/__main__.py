@@ -31,12 +31,7 @@ from scripts.tasks.simple_tasks import (
 )
 from scripts.utils import TermColors
 
-try:
-    from scripts.creds import ACCESS_TOKEN, GAME_ID, SOV_ID
-except ImportError:
-    raise LookupError("Could not find creds.py in scripts package! Did you make one?")
-
-auth = {"auth_token": ACCESS_TOKEN, "game_id": GAME_ID, "sovereign_id": SOV_ID}
+import scripts.creds
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,10 +44,13 @@ async def main() -> None:
     futures: List[Awaitable[None]] = []
     daemon_tasks: List[Task[None]] = []
 
-    context = await Anacreon.from_auth_token(GAME_ID, ACCESS_TOKEN)
+    logger.info("Logging in ...")
+    context = await Anacreon.log_in(
+        scripts.creds.GAME_ID, scripts.creds.USERNAME, scripts.creds.PASSWORD
+    )
+    logger.info("Successfully logged in!")
 
     try:
-
         async def on_every_watch() -> None:
             """builds spaceports and designates low tl worlds on every watch"""
             while True:
@@ -81,10 +79,6 @@ async def main() -> None:
         daemon_tasks.append(asyncio.create_task(every_hour()))
         daemon_tasks.append(asyncio.create_task(every_40_mins()))
         daemon_tasks.append(context.call_get_objects_periodically())
-
-        logger.info("Waiting to get objects")
-        await context.wait_for_get_objects()
-        logger.info("Got objects!")
 
         logger.info(
             f"Number of fleets: {sum(isinstance(obj, Fleet) and obj.sovereign_id == context._auth_info.sovereign_id for obj in context.space_objects.values() )}"

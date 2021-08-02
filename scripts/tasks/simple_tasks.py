@@ -24,7 +24,6 @@ from anacreonlib.types.scenario_info_datatypes import Category, Role, ScenarioIn
 import anacreonlib.exceptions
 from rx.operators import first
 
-from scripts.creds import SOV_ID
 from scripts.utils import flat_list_to_tuples, dist, dict_to_flat_list, world_has_trait
 
 
@@ -63,7 +62,7 @@ async def explore_unexplored_regions(context: Anacreon, fleet_name: str) -> None
         our_sovereign: OwnSovereign = next(
             obj
             for obj in context.sovereigns.values()
-            if isinstance(obj, OwnSovereign) and obj.id == SOV_ID
+            if isinstance(obj, OwnSovereign) and obj.id == context.sov_id
         )
 
         current_fleet: Fleet = find_fleet(context.space_objects.values())

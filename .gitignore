@@ -1,4 +1,3 @@
-creds.py
 *.iml
 .idea/
 __pycache__/
