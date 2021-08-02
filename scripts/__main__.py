@@ -1,8 +1,10 @@
 import asyncio
 from asyncio.tasks import Task
-from anacreonlib import AnacreonClientWrapper
+from anacreonlib import Anacreon
 import logging
 from pprint import pprint
+
+from anacreonlib.types.response_datatypes import Fleet
 from scripts.tasks.transportation_tasks import sell_stockpile_of_resource
 from scripts.tasks.rally import rally_ships_to_world_id
 from scripts.tasks.strategy_tasks import find_sec_cap_candidates
@@ -47,7 +49,7 @@ async def main() -> None:
     futures: List[Awaitable[None]] = []
     daemon_tasks: List[Task[None]] = []
 
-    context = await AnacreonClientWrapper.from_auth_token(GAME_ID, ACCESS_TOKEN)
+    context = await Anacreon.from_auth_token(GAME_ID, ACCESS_TOKEN)
 
     try:
 
@@ -55,7 +57,7 @@ async def main() -> None:
             """builds spaceports and designates low tl worlds on every watch"""
             while True:
                 # wait 1 min for next watch update
-                await context.watch_update_observable.pipe(first())
+                await context.wait_for_get_objects()
                 await asyncio.gather(
                     build_habitats_spaceports(context),
                     cluster_building.designate_low_tl_worlds(context),
@@ -65,12 +67,14 @@ async def main() -> None:
             """garbage collect trade routes every hour"""
             while True:
                 # wait for 60 mins to pass
-                await context.watch_update_observable.pipe(take(60))
+                for _ in range(60):
+                    await context.wait_for_get_objects()
                 await asyncio.gather(garbage_collect_trade_routes(context))
 
         async def every_40_mins() -> None:
             while True:
-                await context.watch_update_observable.pipe(take(40))
+                for _ in range(40):
+                    await context.wait_for_get_objects()
                 await balance_trade_routes(context)
 
         daemon_tasks.append(asyncio.create_task(on_every_watch()))
@@ -82,6 +86,9 @@ async def main() -> None:
         await context.wait_for_get_objects()
         logger.info("Got objects!")
 
+        logger.info(
+            f"Number of fleets: {sum(isinstance(obj, Fleet) and obj.sovereign_id == context._auth_info.sovereign_id for obj in context.space_objects.values() )}"
+        )
         ##//
 
         # hex_res_id = context.get_scn_info_el_unid("core.hexacarbide").id
@@ -115,13 +122,13 @@ async def main() -> None:
         # logger.info(f"The best foundation world ids are")
         # pprint(find_best_foundation_world(context))
 
-        await scout_around_planet(
-            context,
-            center_world_id=155,
-            radius=250,
-            resource_dict={101: 2},
-            source_obj_id=5104,
-        )
+        # await scout_around_planet(
+        #     context,
+        #     center_world_id=155,
+        #     radius=250,
+        #     resource_dict={101: 2},
+        #     source_obj_id=5104,
+        # )
 
         ## Sell a stockpile of resources to the mesophons
         # futures.append(asyncio.create_task(sell_stockpile_of_resource(context, "shuttle", "core.hexacarbide",

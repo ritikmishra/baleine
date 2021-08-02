@@ -8,7 +8,7 @@ from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfoElem
 from fastapi import Depends, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.routing import APIRouter
-from anacreonlib.client_wrapper import AnacreonClientWrapper, ProductionInfo
+from anacreonlib.anacreon import Anacreon, ProductionInfo
 
 from frontend.services import anacreon_context, templates
 
@@ -54,7 +54,7 @@ def plot_points_to_plot(points: List[ScatterPlotPoint]) -> ScatterPlot:
 
 
 def create_resource_scatterplot(
-    context: AnacreonClientWrapper, resource_id: int
+    context: Anacreon, resource_id: int
 ) -> ScatterPlot:
     points: List[ScatterPlotPoint] = []
     for world in (w for w in context.space_objects.values() if isinstance(w, OwnedWorld)):
@@ -106,7 +106,7 @@ def create_resource_scatterplot(
 
 
 def find_total_produced_consumed(
-    context: AnacreonClientWrapper, resource_id: int
+    context: Anacreon, resource_id: int
 ) -> ProductionInfo:
     total = ProductionInfo()
     for world in (w for w in context.space_objects.values() if isinstance(w, OwnedWorld)):
@@ -118,7 +118,7 @@ def find_total_produced_consumed(
     return total
 
 
-def find_total_stockpile(context: AnacreonClientWrapper, resource_id: int) -> float:
+def find_total_stockpile(context: Anacreon, resource_id: int) -> float:
     total = 0.0
     items_with_resources = (
         item
@@ -135,7 +135,7 @@ def find_total_stockpile(context: AnacreonClientWrapper, resource_id: int) -> fl
 
 
 def create_stockpile_scatterplot(
-    context: AnacreonClientWrapper, resource_id: int
+    context: Anacreon, resource_id: int
 ) -> ScatterPlot:
     points: List[ScatterPlotPoint] = []
 
@@ -174,7 +174,7 @@ def create_stockpile_scatterplot(
 
 ## blocker: need to get half life values in separately
 
-# def create_attrition_graph(context: AnacreonClientWrapper, res_id: int, total_stockpile: float, aggregate_prod_info: ProductionInfo):
+# def create_attrition_graph(context: Anacreon, res_id: int, total_stockpile: float, aggregate_prod_info: ProductionInfo):
 #     half_life = context.scenario_info_objects[res_id].
 #     points: List[ScatterPlotPoint] = []
 #     for watch, new_val in zip(range(10 * 1440), scripts.utils.calculate_units_over_time(total_stockpile, ))
@@ -184,7 +184,7 @@ router = APIRouter(prefix="/resource_scatterplot")
 
 @router.get("/", name="scatterplot_root")
 def resource_scatterplot_trillum(
-    context: AnacreonClientWrapper = Depends(anacreon_context),
+    context: Anacreon = Depends(anacreon_context),
 ) -> RedirectResponse:
     trillum_res_id = context.game_info.find_by_unid("core.trillum").id
     assert trillum_res_id is not None
@@ -196,7 +196,7 @@ def resource_scatterplot_trillum(
 async def resource_scatterplot(
     request: Request,
     resource_id: int,
-    context: AnacreonClientWrapper = Depends(anacreon_context),
+    context: Anacreon = Depends(anacreon_context),
 ) -> Response:
     plot = create_resource_scatterplot(context, resource_id)
 

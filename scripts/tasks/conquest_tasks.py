@@ -8,7 +8,7 @@ from asyncio import Future
 from itertools import chain
 from typing import List, Set, Union, Optional
 
-from anacreonlib.client_wrapper import AnacreonClientWrapper, MilitaryForceInfo
+from anacreonlib.anacreon import Anacreon, MilitaryForceInfo
 from anacreonlib.types.response_datatypes import World, Fleet
 from anacreonlib.types.type_hints import BattleObjective
 
@@ -29,14 +29,14 @@ class FleetBucket(abc.ABC):
 
     @abc.abstractmethod
     def calculate_order(
-        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
+        self, context: Anacreon, forces: MilitaryForceInfo, world: World
     ) -> float:
         """Returns the priority of attacking this world for the priority queue"""
         raise NotImplementedError()
 
     @abc.abstractmethod
     def can_attack_world(
-        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
+        self, context: Anacreon, forces: MilitaryForceInfo, world: World
     ) -> bool:
         """
         Determines if fleets in this bucket are allowed to attack a certain world
@@ -49,12 +49,12 @@ class FleetBucket(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def should_decommission_fleet(self, context: AnacreonClientWrapper, fleet: Fleet) -> bool:
+    def should_decommission_fleet(self, context: Anacreon, fleet: Fleet) -> bool:
         """Determines if this fleet can continue or not"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def pilot_fleet(self, context: AnacreonClientWrapper, fleet_id: int) -> None:
+    async def pilot_fleet(self, context: Anacreon, fleet_id: int) -> None:
         raise NotImplementedError()
 
 
@@ -66,7 +66,7 @@ class HammerFleetBucket(FleetBucket):
 
     def calculate_order(
         self: HammerFleetBucket,
-        context: AnacreonClientWrapper,
+        context: Anacreon,
         forces: MilitaryForceInfo,
         world: World,
     ) -> float:
@@ -74,7 +74,7 @@ class HammerFleetBucket(FleetBucket):
 
     def can_attack_world(
         self: HammerFleetBucket,
-        context: AnacreonClientWrapper,
+        context: Anacreon,
         forces: MilitaryForceInfo,
         world: World,
     ) -> bool:
@@ -82,14 +82,14 @@ class HammerFleetBucket(FleetBucket):
         return forces.space_forces <= self.max_space_force
 
     def should_decommission_fleet(
-        self: HammerFleetBucket, context: AnacreonClientWrapper, fleet: Fleet
+        self: HammerFleetBucket, context: Anacreon, fleet: Fleet
     ) -> bool:
         """Determines if this fleet can continue or not"""
         fleet_forces = context.calculate_forces(fleet)
         return fleet_forces.space_forces < self.max_space_force
 
     async def pilot_fleet(
-        self: HammerFleetBucket, context: AnacreonClientWrapper, fleet_id: int
+        self: HammerFleetBucket, context: Anacreon, fleet_id: int
     ) -> None:
         logger_name = f"{self.bucket_name} Fleet Manager (fleet ID {fleet_id})"
         logger = logging.getLogger(logger_name)
@@ -136,7 +136,7 @@ class AntiMissileHammerFleetBucket(HammerFleetBucket):
     max_nonmissile_forces: float = 100
 
     def can_attack_world(
-        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
+        self, context: Anacreon, forces: MilitaryForceInfo, world: World
     ) -> bool:
         """Determines if fleets in this bucket are allowed to attack a certain world"""
         return (
@@ -154,12 +154,12 @@ class NailFleetBucket(FleetBucket):
     output_bucket: None = None
 
     def calculate_order(
-        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
+        self, context: Anacreon, forces: MilitaryForceInfo, world: World
     ) -> float:
         return forces.ground_forces
 
     def can_attack_world(
-        self, context: AnacreonClientWrapper, forces: MilitaryForceInfo, world: World
+        self, context: Anacreon, forces: MilitaryForceInfo, world: World
     ) -> bool:
         """Determines if fleets in this bucket are allowed to attack a certain world"""
         return (
@@ -167,7 +167,7 @@ class NailFleetBucket(FleetBucket):
             and forces.ground_forces <= self.max_ground_force
         )
 
-    def should_decommission_fleet(self, context: AnacreonClientWrapper, fleet: Fleet) -> bool:
+    def should_decommission_fleet(self, context: Anacreon, fleet: Fleet) -> bool:
         """Determines if this fleet can continue or not"""
         fleet_forces = context.calculate_forces(fleet.resources)
         return (
@@ -175,7 +175,7 @@ class NailFleetBucket(FleetBucket):
             or fleet_forces.ground_forces < 2 * self.max_ground_force
         )
 
-    async def pilot_fleet(self, context: AnacreonClientWrapper, fleet_id: int) -> None:
+    async def pilot_fleet(self, context: Anacreon, fleet_id: int) -> None:
         logger_name = f"{self.bucket_name} Fleet Manager (fleet ID {fleet_id})"
         logger = logging.getLogger(logger_name)
 
@@ -207,7 +207,7 @@ class NailFleetBucket(FleetBucket):
 
 
 async def conquer_independents_around_id(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     center_planet: Set[NameOrId],
     *,
     radius=250,
@@ -243,7 +243,7 @@ async def conquer_independents_around_id(
 
 
 async def conquer_planets(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     planets: Union[List[World], Set[NameOrId]],
     *,
     generic_hammer_fleets: Set[NameOrId],
@@ -267,7 +267,7 @@ async def conquer_planets(
 
 
 async def conquer_planets_using_buckets(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     planets: Union[List[World], Set[NameOrId]],
     *,
     fleet_buckets: List[FleetBucket],

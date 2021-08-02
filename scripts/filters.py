@@ -1,5 +1,5 @@
 from typing import Callable
-from anacreonlib.client_wrapper import AnacreonClientWrapper
+from anacreonlib.anacreon import Anacreon
 
 from anacreonlib.types.response_datatypes import World
 
@@ -8,7 +8,7 @@ from scripts.tasks import NameOrId
 
 
 def dist_filter(
-    context: AnacreonClientWrapper, center_planet: NameOrId, radius: float
+    context: Anacreon, center_planet: NameOrId, radius: float
 ) -> Callable[[World], bool]:
     if isinstance(center_planet, int):
         world = context.space_objects[center_planet]

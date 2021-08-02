@@ -15,7 +15,7 @@ from anacreonlib.types.request_datatypes import (
     TradeRouteTypes,
     StopTradeRouteRequest,
 )
-from anacreonlib.client_wrapper import AnacreonClientWrapper, ProductionInfo
+from anacreonlib.anacreon import Anacreon, ProductionInfo
 from anacreonlib.types.response_datatypes import World, Trait, OwnedWorld, TradeRoute
 from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfoElement
 from anacreonlib.types.type_hints import TechLevel, Location
@@ -101,7 +101,7 @@ TL_8_WORLD_CLASSES = {
 
 
 def get_preferred_resource_desig(
-    context: AnacreonClientWrapper, world: World
+    context: Anacreon, world: World
 ) -> Optional[int]:
     """
     If this planet is abundant in any resources, recommend that it is designated as a
@@ -120,7 +120,7 @@ def get_preferred_resource_desig(
     )
 
 
-def find_best_foundation_world(context: AnacreonClientWrapper) -> List[Tuple[int, int]]:
+def find_best_foundation_world(context: Anacreon) -> List[Tuple[int, int]]:
     """
     Find the world which is in trading distance range to the highest number of our planets
 
@@ -168,7 +168,7 @@ def find_best_foundation_world(context: AnacreonClientWrapper) -> List[Tuple[int
     return sorted(world_counts.items(), key=lambda wc: wc[1], reverse=True)
 
 
-async def designate_low_tl_worlds(context: AnacreonClientWrapper) -> None:
+async def designate_low_tl_worlds(context: Anacreon) -> None:
     """
     Goes through all of our worlds and designates them if they are undesignated and low tech level
     :param context:
@@ -210,7 +210,7 @@ async def designate_low_tl_worlds(context: AnacreonClientWrapper) -> None:
 
 
 async def build_cluster(
-    context: AnacreonClientWrapper, center_world_id: int, radius: float = 200
+    context: Anacreon, center_world_id: int, radius: float = 200
 ) -> None:
     logger = logging.getLogger("cluster builder")
 
@@ -245,7 +245,7 @@ async def build_cluster(
 
 
 async def connect_worlds_to_fnd(
-    context: AnacreonClientWrapper, fnd_id: int, worlds: Optional[List[World]] = None
+    context: Anacreon, fnd_id: int, worlds: Optional[List[World]] = None
 ) -> None:
     logger = logging.getLogger(f"connect foundation id {fnd_id}")
 
@@ -305,7 +305,7 @@ class NeedsProvidesInfo:
 
 
 async def calculate_resource_deficit(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     *,
     exports_only: bool = True,
     predicate: Optional[Callable[[OwnedWorld], bool]] = None,

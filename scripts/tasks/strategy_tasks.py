@@ -8,11 +8,11 @@ from typing import Any, Dict, Tuple, Optional, List, Union, NewType
 from anacreonlib.types.response_datatypes import OwnedWorld, World
 
 from scripts import utils
-from anacreonlib import AnacreonClientWrapper
+from anacreonlib import Anacreon
 
 BLocation = NewType("BLocation", Location)
 
-def find_sec_cap_candidates(context: AnacreonClientWrapper, ideal_dist: float = 432, angle_increment: float = math.pi / 3) -> List[World]:
+def find_sec_cap_candidates(context: Anacreon, ideal_dist: float = 432, angle_increment: float = math.pi / 3) -> List[World]:
     logger = logging.getLogger("Sector Capital Search v2")
 
     # Working with two bases here

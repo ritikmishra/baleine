@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import logging
 from typing import List
 
-from anacreonlib import AnacreonClientWrapper
+from anacreonlib import Anacreon
 from anacreonlib.exceptions import HexArcException
 from anacreonlib.types.request_datatypes import AlterImprovementRequest
 from anacreonlib.types.response_datatypes import OwnedWorld, World
@@ -16,10 +16,10 @@ class ConstructionOrder:
     improvement_name: str
 
 
-async def build_habitats_spaceports(context: AnacreonClientWrapper) -> None:
+async def build_habitats_spaceports(context: Anacreon) -> None:
     """
     Builds habitat structures and spaceports on all planets on which they can be built
-    :param context: AnacreonClientWrapper
+    :param context: Anacreon
     :return: None
     """
     logger = logging.getLogger("build habitats and spaceports")

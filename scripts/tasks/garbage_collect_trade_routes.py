@@ -1,13 +1,13 @@
 import logging
 
-from anacreonlib import AnacreonClientWrapper
+from anacreonlib import Anacreon
 from scripts.tasks.balance_trade_routes import PlanetPair
 from typing import List, Set, Union
 from scripts import utils
 from anacreonlib.types.response_datatypes import OwnedWorld, TradeRoute
 
 
-async def garbage_collect_trade_routes(context: AnacreonClientWrapper) -> None:
+async def garbage_collect_trade_routes(context: Anacreon) -> None:
     logger = logging.getLogger("garbage_trade_routes")
 
     our_worlds = {

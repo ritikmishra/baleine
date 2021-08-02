@@ -1,4 +1,4 @@
-from anacreonlib import AnacreonClientWrapper
+from anacreonlib import Anacreon
 import asyncio
 import logging
 from typing import Optional, AsyncGenerator, NamedTuple
@@ -23,7 +23,7 @@ def find_fleet(fleet_id: int, *, state=None, context=None):
     )
 
 
-async def wait_for_fleet(context: AnacreonClientWrapper, fleet_id: int) -> Fleet:
+async def wait_for_fleet(context: Anacreon, fleet_id: int) -> Fleet:
     fleet_obj = context.space_objects[fleet_id]
     assert isinstance(fleet_obj, Fleet)
 
@@ -42,7 +42,7 @@ async def wait_for_fleet(context: AnacreonClientWrapper, fleet_id: int) -> Fleet
 
 
 async def fleet_walk(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     fleet_id: int,
     *,
     input_queue: "asyncio.Queue[OrderedPlanetId]",
@@ -94,7 +94,7 @@ async def fleet_walk(
 
 
 async def attack_fleet_walk(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     fleet_id: int,
     *,
     objective: BattleObjective,

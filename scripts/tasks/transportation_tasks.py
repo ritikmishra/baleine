@@ -12,7 +12,7 @@ from scripts import utils
 from scripts.tasks import NameOrId
 from scripts.tasks.fleet_manipulation_utils import fleet_walk, OrderedPlanetId
 
-from anacreonlib import AnacreonClientWrapper
+from anacreonlib import Anacreon
 
 
 class HasNameAndId(Protocol):
@@ -21,7 +21,7 @@ class HasNameAndId(Protocol):
 
 
 async def sell_stockpile_of_resource(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     transport_fleet_name_or_id: NameOrId,
     resource_name_or_unid: NameOrId,
     worlds_with_stockpile_name_or_id: Set[NameOrId],

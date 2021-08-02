@@ -18,7 +18,7 @@ from anacreonlib.types.response_datatypes import (
     World,
     AnacreonObject,
 )
-from anacreonlib import AnacreonClientWrapper
+from anacreonlib import Anacreon
 from anacreonlib.types.type_hints import Location
 from anacreonlib.types.scenario_info_datatypes import Category, Role, ScenarioInfo
 import anacreonlib.exceptions
@@ -45,7 +45,7 @@ def _exploration_outline_to_points(outline: List[List[float]]) -> List[Location]
     return flat_list_to_tuples(flattened)
 
 
-async def explore_unexplored_regions(context: AnacreonClientWrapper, fleet_name: str) -> None:
+async def explore_unexplored_regions(context: Anacreon, fleet_name: str) -> None:
     def find_fleet(objects: Iterable[AnacreonObject]) -> Fleet:
         return next(
             obj
@@ -108,7 +108,7 @@ async def explore_unexplored_regions(context: AnacreonClientWrapper, fleet_name:
         logger.info(f"New watch, lets see what happened")
 
 
-async def graph_exploration_boundary(context: AnacreonClientWrapper) -> None:
+async def graph_exploration_boundary(context: Anacreon) -> None:
     logger = logging.getLogger("exploration boundary grapher")
     our_sovereign = next(
         obj
@@ -145,7 +145,7 @@ def _ensure_filename_exists(filename: str) -> None:
 
 
 def dump_state_to_json(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     state_subset: Optional[List[AnacreonObject]] = None,
     filename: str = "out/objects.json",
 ) -> None:
@@ -182,7 +182,7 @@ def dump_state_to_json(
 
 
 async def dump_scn_to_json(
-    context: AnacreonClientWrapper, filename: str = "out/scn_info.json"
+    context: Anacreon, filename: str = "out/scn_info.json"
 ) -> None:
     logger = logging.getLogger("dump scn info")
 
@@ -198,7 +198,7 @@ async def dump_scn_to_json(
 
 
 async def send_fleet_to_worlds_meeting_predicate(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     source_obj_id: int,
     resources: Dict[int, int],
     predicate: Callable[[World], bool],
@@ -230,7 +230,7 @@ async def send_fleet_to_worlds_meeting_predicate(
 
 
 async def scout_around_planet(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     center_world_id: int,
     radius: float = 200,
     *,
@@ -240,7 +240,7 @@ async def scout_around_planet(
     """
     Sends fleets to all planets within a radius of the center planet
 
-    :param context: AnacreonClientWrapper
+    :param context: Anacreon
     :param center_world_id: The world that should be the center of our circle
     :param radius: The radius of the circle
     :param resource_dict: the fleet composition. defaults to 5 vanguards.
@@ -271,7 +271,7 @@ class ZeroOutDefenseStructureAllocationMode(IntEnum):
 
 
 async def zero_out_defense_structure_allocation(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     mode: ZeroOutDefenseStructureAllocationMode = ZeroOutDefenseStructureAllocationMode.DESIGNATED_WORLDS,
 ) -> None:
     logger = logging.getLogger("zero_out_defense_structure_allocation")

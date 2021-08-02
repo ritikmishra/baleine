@@ -1,6 +1,6 @@
 import asyncio
 from typing import Callable, List, Optional
-from anacreonlib.client_wrapper import AnacreonClientWrapper
+from anacreonlib.anacreon import Anacreon
 import logging
 from anacreonlib.types.response_datatypes import Fleet, OwnedWorld, World
 from scripts.tasks import fleet_manipulation_utils
@@ -9,7 +9,7 @@ from scripts.tasks import fleet_manipulation_utils
 
 
 async def rally_ships_to_world_id(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     ship_resource_id: int,
     ship_qty: Optional[int],
     destination_world_id: int,
@@ -17,7 +17,7 @@ async def rally_ships_to_world_id(
     """Rally ships to a particular world ID
 
     Args:
-        context (AnacreonClientWrapper): context
+        context (Anacreon): context
         ship_resource_id (int): Resource ID of the ship type to rally
         ship_qty (Optional[int]): Total number of ships that should
             arrive at the destination world, ignoring attrition. If None,

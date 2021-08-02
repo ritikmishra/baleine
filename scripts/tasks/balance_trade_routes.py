@@ -3,7 +3,7 @@ import functools
 import logging
 from dataclasses import replace, dataclass
 
-from anacreonlib.client_wrapper import AnacreonClientWrapper, ProductionInfo
+from anacreonlib.anacreon import Anacreon, ProductionInfo
 from scripts import utils
 import anacreonlib.exceptions
 from anacreonlib.types.type_hints import Location
@@ -74,7 +74,7 @@ class PlanetPair:
 
 
 async def balance_trade_routes(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     filter: WorldFilter = lambda w: True,
     dry_run: bool = False,
 ) -> None:
@@ -124,7 +124,7 @@ class TradeRouteInfo:
     res_id: int
 
 async def balance_routes_for_one_resource(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     our_worlds: Dict[int, OwnedWorld],
     resource_id: int,
     dry_run: bool = False,
@@ -562,7 +562,7 @@ def adjust_graph_edges(
 
 
 def compile_graph_edge_changes(
-    context: AnacreonClientWrapper,
+    context: Anacreon,
     resource_id: int,
     importers: Dict[int, ResourceImporterGraphNode],
     old_graph_edges: Dict[PlanetPair, ResourceGraphEdge],
@@ -571,7 +571,7 @@ def compile_graph_edge_changes(
     """Turns changes in the import graph for one resource into request bodies that can then be sent to the Anacreon API
 
     Args:
-        context (AnacreonClientWrapper): context (used only for context.auth)
+        context (Anacreon): context (used only for context.auth)
         resource_id (int): Resource ID for which the graph edges represent trading
         importers (Dict[int, ResourceImporterGraphNode]): A dict of all importer planets on the trade graph
         old_graph_edges (Dict[PlanetPair, ResourceGraphEdge]): The trage graph that currently exists
