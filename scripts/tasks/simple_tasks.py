@@ -212,7 +212,21 @@ async def send_fleet_to_worlds_meeting_predicate(
         for world in context.space_objects.values()
         if isinstance(world, World) and predicate(world)
     ]
-    for world in worlds_to_send_fleet_to:
+    await send_scouts_to_worlds(context, source_obj_id, resources, worlds_to_send_fleet_to)
+
+async def send_scouts_to_worlds(
+    context: Anacreon,
+    source_obj_id: int,
+    resources: Dict[int, int],
+    world_ids: List[World]
+) -> None:
+    logger = logging.getLogger()
+    for world in world_ids:
+        if world.resources is not None:
+            logger.info(
+                f"Skipping sending a fleet to (name = {world.name!r}) (id = '{world.id}')"
+            )
+            continue
         newest_fleet = await context.deploy_fleet(source_obj_id, resources)
         assert newest_fleet is not None, "Could not find newest fleet??"
 
