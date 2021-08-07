@@ -1,7 +1,9 @@
+import math
 import asyncio
 import logging
 from pprint import pprint
-from typing import List, Protocol, Union, Set
+from typing import Callable, Counter, List, Mapping, Optional, Protocol, Union, Set
+from anacreonlib.anacreon import MilitaryForceInfo
 
 from anacreonlib.types.request_datatypes import TransferFleetRequest, SellFleetRequest
 from anacreonlib.types.response_datatypes import Fleet, OwnedWorld, Trait, World
@@ -11,6 +13,7 @@ from anacreonlib.types.type_hints import Location
 from scripts import utils
 from scripts.tasks import NameOrId
 from scripts.tasks.fleet_manipulation_utils import fleet_walk, OrderedPlanetId
+from scripts.tasks.fleet_manipulation_utils_v2 import fleet_walk as fleet_walk_v2
 
 from anacreonlib import Anacreon
 
@@ -69,7 +72,11 @@ async def sell_stockpile_of_resource(
         if all(isinstance(fleet, int) for fleet in name_id_set):
             return [context.space_objects[int(obj_id)] for obj_id in name_id_set]
         else:
-            return [obj for obj in context.space_objects.values() if matches(obj, name_id_set)]
+            return [
+                obj
+                for obj in context.space_objects.values()
+                if matches(obj, name_id_set)
+            ]
 
     transport_fleet_id: int = next(
         fleet.id
@@ -111,7 +118,7 @@ async def sell_stockpile_of_resource(
 
     # Queue of worlds to send the fleet to
     destination_queue: "asyncio.Queue[OrderedPlanetId]" = asyncio.Queue()
-    destination_queue.put_nowait(OrderedPlanetId(None, world_queue.get_nowait().id))
+    destination_queue.put_nowait(OrderedPlanetId(0, world_queue.get_nowait().id))
 
     def find_nearest_mesophon(pos: Location) -> World:
         return min(
@@ -142,7 +149,7 @@ async def sell_stockpile_of_resource(
         if world_after_arrival.sovereign_id == int(context._auth_info.sovereign_id):
             # remember to go to mesophon next
             destination_queue.put_nowait(
-                OrderedPlanetId(None, find_nearest_mesophon(world_after_arrival.pos).id)
+                OrderedPlanetId(0, find_nearest_mesophon(world_after_arrival.pos).id)
             )
 
             # load up on the resource
@@ -159,9 +166,7 @@ async def sell_stockpile_of_resource(
 
             if qty_on_world > max_transportable_qty:
                 qty_to_carry = max_transportable_qty
-                destination_queue.put_nowait(
-                    OrderedPlanetId(None, world_after_arrival.id)
-                )
+                destination_queue.put_nowait(OrderedPlanetId(0, world_after_arrival.id))
             else:
                 qty_to_carry = qty_on_world
                 world_queue.task_done()
@@ -170,7 +175,11 @@ async def sell_stockpile_of_resource(
             logger.info(
                 f"Putting {qty_to_carry:,} units of {resource_elem.name_desc} in fleet cargo hold"
             )
-            await context.transfer_fleet(transport_fleet_id, world_after_arrival.id, [resource_elem.id, qty_to_carry])
+            await context.transfer_fleet(
+                transport_fleet_id,
+                world_after_arrival.id,
+                [resource_elem.id, qty_to_carry],
+            )
 
         elif world_after_arrival.sovereign_id == int(mesophon_sov_id):
             # sell the resource
@@ -183,9 +192,9 @@ async def sell_stockpile_of_resource(
             logger.info(f"Selling {qty_in_fleet:,} units of {resource_elem.name_desc}")
 
             await context.sell_fleet(
-                    fleet_id=transport_fleet_id,
-                    buyer_obj_id=world_after_arrival.id,
-                    resources=[resource_elem.id, qty_in_fleet],
+                fleet_id=transport_fleet_id,
+                buyer_obj_id=world_after_arrival.id,
+                resources=[resource_elem.id, qty_in_fleet],
             )
 
         else:
@@ -194,3 +203,140 @@ async def sell_stockpile_of_resource(
             )
 
         await walk.asend(None)
+
+
+async def rally_ground_forces_to_planet(
+    context: Anacreon,
+    transport_fleet_id: int,
+    destination_planet_id: int,
+    *,
+    threshold_pct: float = 0.1,
+) -> None:
+    logger = logging.getLogger("rally ground forces to planet")
+    # sorted by resource quantity descending
+    get_resource_qty: Callable[[OwnedWorld], float] = lambda owned_world: context.calculate_forces(
+        owned_world
+    ).ground_forces
+
+    ground_force_resources: Mapping[int, ScenarioInfoElement] = {
+        scn_id: context.scenario_info_objects[scn_id]
+        for scn_id in context._force_calculator.gf_calc.keys()
+    }
+
+    foo = sorted(
+        (
+            world
+            for world in context.space_objects.values()
+            if isinstance(world, OwnedWorld)
+            and world.id != destination_planet_id
+            and context.calculate_forces(world).ground_forces > 0
+        ),
+        key=get_resource_qty,
+    )
+
+    our_worlds_with_resource = [world.id for world in foo]
+
+    for world in foo:
+        logger.info(f"{world.name!r}\t{get_resource_qty(world)}\t\t{world.id}")
+
+    input()
+
+    input_queue: "asyncio.Queue[OrderedPlanetId]" = asyncio.Queue()
+    input_queue.put_nowait(OrderedPlanetId(0, our_worlds_with_resource.pop()))
+
+    async def on_arrival_at_world(world: World) -> None:
+        if world.id == destination_planet_id:
+            # We are here to unload!
+            to_transfer = {
+                res_id: -qty
+                for res_id, qty in utils.flat_list_to_tuples(
+                    context.space_objects[transport_fleet_id].resources
+                )
+                if res_id in ground_force_resources.keys()
+            }
+            logging.info(f"Unloading objects: {to_transfer!r}")
+            await context.transfer_fleet(transport_fleet_id, world.id, to_transfer)
+
+            # Go to next planet
+            input_queue.put_nowait(OrderedPlanetId(0, our_worlds_with_resource.pop()))
+
+        else:
+            # We are here to load up!
+            fleet = context.space_objects[transport_fleet_id]
+            assert isinstance(fleet, Fleet)
+
+            fleet_total_cargo_space = sum(
+                cargo_space * ship_qty
+                for ship_id, ship_qty in utils.flat_list_to_tuples(fleet.resources)
+                if (cargo_space := context.scenario_info_objects[ship_id].cargo_space)
+                is not None
+            )
+            fleet_remaining_cargo_space = min(
+                context.calculate_remaining_cargo_space(fleet),
+                math.ceil(0.98 * fleet_total_cargo_space),
+            )
+
+            available_gf_resources = {
+                res_id: res_qty
+                for res_id, res_qty in world.resource_dict.items()
+                if res_id in ground_force_resources
+            }
+            to_transfer = {scn_id: 0 for scn_id in ground_force_resources.keys()}
+
+            # Figure out what the most we can take is
+            for res_id, qty in available_gf_resources.items():
+                res_mass = ground_force_resources[res_id].mass
+                assert res_mass is not None
+
+                qty_to_take = min(
+                    math.floor(fleet_remaining_cargo_space / res_mass), math.floor(qty)
+                )
+
+                cargo_used = qty_to_take * res_mass
+                fleet_remaining_cargo_space -= cargo_used
+                assert fleet_remaining_cargo_space >= 0
+
+                to_transfer[res_id] = qty_to_take
+                available_gf_resources[res_id] -= qty_to_take
+
+                if qty_to_take < qty:
+                    break
+
+            # Take it
+            logging.info(
+                f"Loading objects {to_transfer!r} from world id {world.id} (name: {world.name!r})"
+            )
+            await context.transfer_fleet(transport_fleet_id, world.id, to_transfer)
+            remaining_space = context.calculate_remaining_cargo_space(
+                transport_fleet_id
+            )
+            if remaining_space > 0.20 * fleet_total_cargo_space:
+                logging.info("going to next planet")
+                # We took everything from this planet and have space left over
+                # so we go to the next planet
+                input_queue.put_nowait(
+                    OrderedPlanetId(0, our_worlds_with_resource.pop())
+                )
+            else:
+                logging.info("going to unload")
+                # We need to go unload, and come back and revisit this planet
+                input_queue.put_nowait(OrderedPlanetId(0, destination_planet_id))
+                our_worlds_with_resource.append(world.id)
+
+    await fleet_walk_v2(
+        context,
+        transport_fleet_id,
+        on_arrival_at_world,
+        input_queue=input_queue,
+        input_queue_is_live=False,  # we will make sure there is always one item in the queue
+    )
+
+    # architecture - intern for 3 years
+    # long hours, male dominated, paid that much
+
+    # total_qty = sum(map(get_resource_qty, our_worlds_with_resource))
+
+    # if resource_qty is None:
+    #     resource_qty = total_qty
+
+    return None
