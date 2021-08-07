@@ -12,7 +12,7 @@ from anacreonlib.types.type_hints import Location
 
 from scripts import utils
 from scripts.tasks import NameOrId
-from scripts.tasks.fleet_manipulation_utils import fleet_walk, OrderedPlanetId
+from scripts.tasks.fleet_manipulation_utils import OrderedPlanetId
 from scripts.tasks.fleet_manipulation_utils_v2 import fleet_walk as fleet_walk_v2
 
 from anacreonlib import Anacreon
@@ -138,14 +138,10 @@ async def sell_stockpile_of_resource(
             key=lambda w: utils.dist(pos, w.pos),
         )
 
-    walk = fleet_walk(
-        context,
-        transport_fleet_id,
-        input_queue=destination_queue,
-        logger_name=logger_name,
-    )
+    class Done(Exception):
+        pass
 
-    async for world_after_arrival in walk:
+    async def on_arrival_at_world(world_after_arrival: World) -> None:
         if world_after_arrival.sovereign_id == int(context._auth_info.sovereign_id):
             # remember to go to mesophon next
             destination_queue.put_nowait(
@@ -157,12 +153,11 @@ async def sell_stockpile_of_resource(
                 context.calculate_remaining_cargo_space(transport_fleet_id) * 0.98
             )
             max_transportable_qty = remaining_cargo_space / resource_elem.mass
-            qty_on_world = dict(
-                utils.flat_list_to_tuples(world_after_arrival.resources)
-            )[resource_elem.id]
+            qty_on_world = world_after_arrival.resource_dict.get(resource_elem.id, 0)
 
             if qty_on_world < threshold:
-                break
+                # When `attack_fleet_walk_v2` calls us, this exception will bubble up and 
+                raise Done()
 
             if qty_on_world > max_transportable_qty:
                 qty_to_carry = max_transportable_qty
@@ -202,7 +197,16 @@ async def sell_stockpile_of_resource(
                 f"Why are we at this planet (name: {world_after_arrival.name}, id: {world_after_arrival.id})? It is neither ours or Mesophon"
             )
 
-        await walk.asend(None)
+    try:
+        await fleet_walk_v2(
+            context,
+            transport_fleet_id,
+            on_arrival_at_world,
+            input_queue=destination_queue,
+            logger_name=logger_name,
+        )
+    except Done:
+        pass
 
 
 async def rally_ground_forces_to_planet(
