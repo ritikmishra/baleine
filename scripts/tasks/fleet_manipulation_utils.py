@@ -34,7 +34,7 @@ async def wait_for_fleet(context: Anacreon, fleet_id: int) -> Fleet:
             fleet_obj = context.space_objects[fleet_id]
             assert isinstance(fleet_obj, Fleet)
 
-            if fleet_obj.anchor_obj_id:
+            if fleet_obj.eta is None:
                 break
             logging.info(f"Still waiting for fleet id {fleet_id} to get to destination")
 
