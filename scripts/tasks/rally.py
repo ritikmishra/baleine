@@ -89,9 +89,8 @@ async def rally_ships_to_world_id(
         f"fleets arrived, merging fleets into fleet {master_fleet.name} (id {master_fleet.id})"
     )
 
-    # TODO: fix
     for fleet in fleets_to_merge:
-        await context.transfer_fleet(fleet.id, master_fleet.id, fleet.resources)
+        await context.transfer_fleet(master_fleet.id, fleet.id, fleet.resources)
 
     # done!
 
