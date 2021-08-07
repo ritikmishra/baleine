@@ -62,7 +62,9 @@ async def fleet_walk(
         fleet = context.space_objects[fleet_id]
         assert isinstance(fleet, Fleet)
         if fleet.eta:
-         logger_name          fleet = context.space_objects[fleet_id]
+            while True:
+                await context.wait_for_get_objects()
+                fleet = context.space_objects[fleet_id]
                 assert isinstance(fleet, Fleet)
                 if fleet.anchor_obj_id == planet_id:
                     break
