@@ -4,6 +4,7 @@ import logging
 import logging.handlers
 
 from anacreonlib import Anacreon
+from websockets.exceptions import ConnectionClosedOK
 from fastapi.param_functions import Depends
 from typing import Any, AsyncGenerator, Callable, Coroutine, List, Optional, Tuple, cast
 
@@ -136,6 +137,9 @@ async def stream_logs_ws_example(websocket: WebSocket) -> None:
             await websocket.send_text(
                 f'<span id="logs" hx-swap-oob="beforeend">{log_msg}</span>'
             )
+    except ConnectionClosedOK:
+        # Not an error case
+        pass
     finally:
         logging.info("closing websocket")
         await websocket.close()
