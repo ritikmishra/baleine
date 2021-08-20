@@ -18,4 +18,7 @@ This script set includes a web dashboard. This dashboard has 2 primary features
     surpluses/deficits. They also let you see where resources are being stockpiled
     in your empire.
 
+
 The dashboard is written in pure Python using minimal client-side JS. 
+
+![dashboard heatmap screenshot](_images/dashboard_heatmap.png)
