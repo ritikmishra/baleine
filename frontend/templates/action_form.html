@@ -1,0 +1,23 @@
+<div class="modal is-active" id="task_form" hx-target="this" hx-swap="outerHTML">
+    <div class="modal-background"></div>
+    <form hx-post="/api/run_task/{{func_idx}}">
+        <div class="modal-card">
+            <header class="modal-card-head">
+                <p class="modal-card-title">{{title}}</p>
+                <button class="delete" hx-post="/api/cancel_task"></button>
+            </header>
+            <section class="modal-card-body">
+                {% for param in params %}
+                <div class="field">
+                    <label class="label">{{param.name}}</label>
+                    {{param.markup | safe}}
+                </div>
+                {% endfor %}
+            </section>
+            <footer class="modal-card-foot">
+                <input type="submit" class="button is-success" value="Do Action">
+                <button class="button" hx-post="/api/cancel_task">Cancel</button>
+            </footer>
+        </form>
+    </div>
+</div>

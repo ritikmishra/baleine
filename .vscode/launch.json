@@ -5,10 +5,16 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Module",
+            "name": "anacreon_async scripts",
             "type": "python",
             "request": "launch",
             "module": "scripts"
+        },
+        {
+            "name": "anacreon_async frontend",
+            "type": "python",
+            "request": "launch",
+            "module": "frontend"
         }
     ]
 }

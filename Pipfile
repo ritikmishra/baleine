@@ -11,6 +11,7 @@ numpy = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 fastapi = "*"
 jinja2 = "*"
+python-multipart = "*"
 
 [dev-packages]
 mypy = "*"
@@ -25,6 +26,5 @@ allow_prereleases = true
 [scripts]
 # run the frontend web server
 frontend = "uvicorn frontend.app:app"
-
 # run scripts/__main__.py
 scripts = "python -m scripts"
