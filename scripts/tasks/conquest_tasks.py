@@ -16,7 +16,7 @@ import anacreonlib.utils
 
 from scripts import utils
 from scripts.tasks import NameOrId
-from scripts.tasks.fleet_manipulation_utils import OrderedPlanetId, attack_fleet_walk
+from scripts.tasks.fleet_manipulation_utils import OrderedPlanetId
 from scripts.utils import TermColors
 
 from scripts.tasks.fleet_manipulation_utils_v2 import (
