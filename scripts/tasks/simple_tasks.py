@@ -23,7 +23,7 @@ from anacreonlib.types.type_hints import Location
 from anacreonlib.types.scenario_info_datatypes import Category, Role, ScenarioInfo
 import anacreonlib.exceptions
 from rx.operators import first
-
+from shared.param_types import AnyWorldId, CommodityId, OurWorldId
 from scripts.utils import flat_list_to_tuples, dist, dict_to_flat_list, world_has_trait
 
 
@@ -244,11 +244,11 @@ async def send_scouts_to_worlds(
 
 async def scout_around_planet(
     context: Anacreon,
-    center_world_id: int,
+    center_world_id: AnyWorldId,
     radius: float = 200,
     *,
-    resource_dict: Optional[Dict[int, int]] = None,
-    source_obj_id: Optional[int] = None,
+    resource_dict: Optional[Dict[CommodityId, int]] = None,
+    source_obj_id: OurWorldId,
 ) -> None:
     """
     Sends fleets to all planets within a radius of the center planet
@@ -264,8 +264,6 @@ async def scout_around_planet(
 
     if resource_dict is None:
         resource_dict = {101: 5}  # 5 helions
-    if source_obj_id is None:
-        source_obj_id = center_world_id
 
     center = context.space_objects[center_world_id]
 

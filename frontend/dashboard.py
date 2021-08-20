@@ -1,5 +1,10 @@
 from .utils import LosslessMutableMultiDict
-from frontend.parameter_generation import AnyWorldId, AnyWorldSelector, DictSelector, ListSelector, ObjectSelector, OurFleetId, OurFleetsSelector, OurWorldId, OurWorldSelector, PrimitiveSelector, fake_send_fleets, get_selector
+from frontend.parameter_generation import (
+    DictSelector,
+    ListSelector,
+    fake_send_fleets,
+    get_selector,
+)
 import functools
 import asyncio
 import logging
@@ -9,8 +14,17 @@ from anacreonlib.anacreon import Anacreon
 from websockets.exceptions import ConnectionClosedOK
 from fastapi.param_functions import Body, Depends, Form
 import typing
-from typing import Any, AsyncGenerator, Callable, Coroutine, Dict, List, Optional, Tuple, cast
-from fastapi import Request, Response, HTTPException
+from typing import (
+    Any,
+    AsyncGenerator,
+    Callable,
+    Coroutine,
+    Dict,
+    List,
+    Optional,
+    cast,
+)
+from fastapi import Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.routing import APIRouter
 from fastapi.websockets import WebSocket
@@ -26,6 +40,7 @@ from scripts.tasks import (
     simple_tasks,
 )
 
+import pprint
 
 @dataclass
 class DashboardFunction:
@@ -73,9 +88,10 @@ dashboard_functions: List[DashboardFunction] = [
         simple_tasks.zero_out_defense_structure_allocation,
     ),
     DashboardFunction(
-        "Fake send fleets",
-        fake_send_fleets
+        "send scouts around world",
+        simple_tasks.scout_around_planet
     )
+    # DashboardFunction("Fake send fleets", fake_send_fleets),
 ]
 
 
@@ -124,9 +140,7 @@ def dashboard(request: Request) -> Response:
 
 @router.post("/api/run_task/{func_idx}", name="run_task")
 async def run_parametrized_anacreon_task(
-    func_idx: int,
-    request: Request,
-    context: Anacreon = Depends(anacreon_context)
+    func_idx: int, request: Request, context: Anacreon = Depends(anacreon_context)
 ) -> HTMLResponse:
     logger = logging.getLogger("run_parametrized_anacreon_task")
     form_data = LosslessMutableMultiDict(await request.form())
@@ -140,31 +154,38 @@ async def run_parametrized_anacreon_task(
         if type == Anacreon:
             kwargs[name] = context
             continue
-        
+
         selector = get_selector(context, type)
         kwargs[name] = selector.parse_form_response(form_data, name)
 
     if len(form_data) > 0:
         logger.warning(f"Some form data was left unprocessed!")
         logger.warning(f"{form_data!r}")
-    
+
+    logger.info(f"args!\n{pprint.pformat(kwargs)}")
+
     asyncio.create_task(func(**kwargs))
     return HTMLResponse("")
+
 
 @router.post("/api/cancel_task", name="cancel_task", response_class=HTMLResponse)
 async def hide_task_modal() -> HTMLResponse:
     return HTMLResponse("")
 
-@router.get("/api/get_action_params/{func_idx}", name="get_action_params", response_class=HTMLResponse)
+
+@router.get(
+    "/api/get_action_params/{func_idx}",
+    name="get_action_params",
+    response_class=HTMLResponse,
+)
 async def get_action_params(
-    func_idx: int,
-    request: Request,
-    context: Anacreon = Depends(anacreon_context)
+    func_idx: int, request: Request, context: Anacreon = Depends(anacreon_context)
 ) -> HTMLResponse:
     func = dashboard_functions[func_idx].func
     type_hints = typing.get_type_hints(func)
     if "return" in type_hints:
         del type_hints["return"]
+
     @dataclass
     class Param:
         name: str
@@ -174,21 +195,24 @@ async def get_action_params(
     for name, type in type_hints.items():
         if type == Anacreon:
             continue
-        
+
         selector = get_selector(context, type)
         params.append(Param(name, selector.get_html(name, func_idx)))
-    
+
     return templates.TemplateResponse(
         "action_form.html",
         {
             "request": request,
             "title": func.__name__,
             "params": params,
-            "func_idx": func_idx
-        }
+            "func_idx": func_idx,
+        },
     )
 
-@router.post("/api/list_func_param/get_new_row", name="get_new_row", response_class=HTMLResponse)
+
+@router.post(
+    "/api/list_func_param/get_new_row", name="get_new_row", response_class=HTMLResponse
+)
 async def get_new_row(
     context: Anacreon = Depends(anacreon_context),
     func_id: int = Form(...),
@@ -204,9 +228,10 @@ async def get_new_row(
         child_selector = selector.child_selector.child_selector
     else:
         raise Exception("unreachable")
-    
+
     html = child_selector.get_html(param_name, func_id)
-    return HTMLResponse(f"""
+    return HTMLResponse(
+        f"""
     <div class="columns is-vcentered">
         <div class="column">
             {html}
@@ -215,7 +240,9 @@ async def get_new_row(
             <button class="delete is-small" type="button" hx-post="/api/cancel_task" hx-target="closest div.columns"></button>
         </div>
     </div>
-    """)
+    """
+    )
+
 
 @router.websocket("/log_stream", name="log_stream")
 async def stream_logs_ws_example(websocket: WebSocket) -> None:

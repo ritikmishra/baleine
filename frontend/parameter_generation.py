@@ -40,10 +40,12 @@ from anacreonlib.types.scenario_info_datatypes import Category
 from fastapi.param_functions import Form
 from .utils import LosslessMutableMultiDict
 
-OurFleetId = NewType("OurFleetId", int)
-OurWorldId = NewType("OurWorldId", int)
-AnyWorldId = NewType("AnyWorldId", int)
-CommodityId = NewType("CommodityId", int)
+from shared.param_types import (
+    OurFleetId,
+    OurWorldId,
+    AnyWorldId,
+    CommodityId
+)
 
 T = TypeVar("T")
 
@@ -96,7 +98,7 @@ class ListSelector(FormInputBase[List[T]], Generic[T]):
         ret += self.child_selector.get_html(name, func_id)
         # FIXME add func id
         ret += f"""
-        <button class="button is-light is-small" 
+        <button class="button is-light is-small"
                 type="button"
                 hx-post="/api/list_func_param/get_new_row"
                 hx-vals='{{"func_id": {func_id}, "param_name": "{name}"}}'
@@ -119,7 +121,7 @@ class ListSelector(FormInputBase[List[T]], Generic[T]):
                 ret.append(self.child_selector.parse_form_response(form_response, name))
             except LookupError:
                 break
-            
+
         return ret
 
 
@@ -245,10 +247,10 @@ CommoditySelector: Callable[
     [Anacreon], ObjectSelector[CommodityId]
 ] = lambda context: ObjectSelector(
     {
-        c.id: NameAndValue(c.name, CommodityId(c.id))
+        c.id: NameAndValue(c.name_desc, CommodityId(c.id))
         for c in context.game_info.scenario_info
         if (c.category == Category.COMMODITY or c.attack_value is not None)
-        and (c.name is not None and c.id is not None)
+        and (c.name_desc is not None and c.id is not None)
     }
 )
 
@@ -265,6 +267,18 @@ def get_selector(context: Anacreon, val_type: type) -> FormInputBase[Any]:
         return CommoditySelector(context)
     elif val_type in (str, int, float):
         return PrimitiveSelector(val_type)
+    
+    # Handle typing.Optional
+    elif typing.get_origin(val_type) is typing.Union:
+        type_params = typing.get_args(val_type)
+        # TODO python 3.10 refactor to use match syntax
+        if len(type_params) == 2:
+            a, b = type_params
+            if a is type(None):
+                return get_selector(context, b)
+            elif b is type(None):
+                return get_selector(context, a)
+        
     elif typing.get_origin(val_type) is list:
         type_param = typing.get_args(val_type)[0]
         return ListSelector(get(type_param))
@@ -274,8 +288,8 @@ def get_selector(context: Anacreon, val_type: type) -> FormInputBase[Any]:
     elif typing.get_origin(val_type) is dict:
         k, v = typing.get_args(val_type)
         return DictSelector(get(k), get(v))
-    else:
-        raise TypeError(f"unspported type as dash func param: {val_type!r}")
+
+    raise TypeError(f"unspported type as dash func param: {val_type!r}")
 
 
 # ---------------------
