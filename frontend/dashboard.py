@@ -3,7 +3,6 @@ from .utils import LosslessMutableMultiDict
 from frontend.parameter_generation import (
     DictSelector,
     ListSelector,
-    fake_send_fleets,
     get_selector,
 )
 import functools
@@ -96,7 +95,6 @@ dashboard_functions: List[DashboardFunction] = [
         "conquer worlds around ID", conquest_tasks.conquer_independents_around_id
     ),
     DashboardFunction("rally ships to location", rally.rally_ships_to_world_id)
-    # DashboardFunction("Fake send fleets", fake_send_fleets),
 ]
 
 

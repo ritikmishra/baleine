@@ -304,25 +304,3 @@ def get_selector(context: Anacreon, val_type: type) -> FormInputBase[Any]:
         return DictSelector(get(k), get(v))
 
     raise TypeError(f"unspported type as dash func param: {val_type!r}")
-
-
-# ---------------------
-
-
-# ---------------------
-
-
-async def fake_send_fleets(
-    context: Anacreon,
-    resources: Dict[AnyWorldId, int],
-    fleet_id: OurFleetId,
-    fleets: List[OurFleetId]
-) -> None:
-    print(
-        f"""
-    Context: {context!r}
-    resources: {resources!r}
-    fleet_id: {fleet_id!r}
-    fleets: {fleets!r}
-    """
-    )
