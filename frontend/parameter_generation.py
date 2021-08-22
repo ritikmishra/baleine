@@ -10,7 +10,9 @@ There are 3 components
 
 """
 
+from enum import Enum
 import typing
+import inspect
 import functools
 from uuid import uuid4
 import abc
@@ -212,6 +214,17 @@ class ObjectSelector(FormInputBase[U], Generic[U]):
     def _parse_from_text(self, text: str) -> U:
         return self._objects[int(text)].value
 
+T3 = TypeVar("T3", bound=Enum)
+class EnumSelector(FormInputBase[T3], Generic[T3]):
+    def __init__(self, enum: Type[T3]):
+        self._enum_members = enum.__members__
+
+    def get_html(self, name: str, func_id: int) -> str:
+        options = [f"""<option value="{v}">{v}</option>""" for v in self._enum_members.keys()]
+        return f"""<div class="select"><select name="{name}"">{"".join(options)}</select></div>"""
+    
+    def _parse_from_text(self, text: str) -> T3:
+        return self._enum_members[text]
 
 OurFleetsSelector: Callable[
     [Anacreon], ObjectSelector[OurFleetId]
@@ -267,7 +280,8 @@ def get_selector(context: Anacreon, val_type: type) -> FormInputBase[Any]:
         return CommoditySelector(context)
     elif val_type in (str, int, float):
         return PrimitiveSelector(val_type)
-    
+    elif inspect.isclass(val_type) and issubclass(val_type, Enum):
+        return EnumSelector(val_type)
     # Handle typing.Optional
     elif typing.get_origin(val_type) is typing.Union:
         type_params = typing.get_args(val_type)
