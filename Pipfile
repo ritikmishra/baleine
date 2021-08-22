@@ -17,8 +17,9 @@ python-multipart = "*"
 mypy = "*"
 black = "*"
 
-[requires]
-python_version = "3.8"
+# see github.com/pypa/pipenv/issues/1050
+# [requires]
+# python_version = "3.8"
 
 [pipenv]
 allow_prereleases = true
