@@ -1,3 +1,4 @@
+from contextlib import suppress
 from .utils import LosslessMutableMultiDict
 from frontend.parameter_generation import (
     DictSelector,
@@ -34,13 +35,16 @@ from frontend.services import anacreon_context, templates
 from dataclasses import dataclass
 
 from scripts.tasks import (
+    conquest_tasks,
     improvement_related_tasks,
     garbage_collect_trade_routes,
     balance_trade_routes,
+    rally,
     simple_tasks,
 )
 
 import pprint
+
 
 @dataclass
 class DashboardFunction:
@@ -87,10 +91,11 @@ dashboard_functions: List[DashboardFunction] = [
         "Deallocate defense structures",
         simple_tasks.zero_out_defense_structure_allocation,
     ),
+    DashboardFunction("send scouts around world", simple_tasks.scout_around_planet),
     DashboardFunction(
-        "send scouts around world",
-        simple_tasks.scout_around_planet
-    )
+        "conquer worlds around ID", conquest_tasks.conquer_independents_around_id
+    ),
+    DashboardFunction("rally ships to location", rally.rally_ships_to_world_id)
     # DashboardFunction("Fake send fleets", fake_send_fleets),
 ]
 
@@ -129,6 +134,25 @@ async def stream_logs_async(
 
 
 router = APIRouter()
+
+
+@router.on_event("startup")
+async def validate_dashboard_functions() -> None:
+    context = await anacreon_context()
+    for dash_func in dashboard_functions:
+        dash_func_argtypes = typing.get_type_hints(dash_func.func)
+        with suppress(KeyError):
+            del dash_func_argtypes["return"]
+        for name, ty in dash_func_argtypes.items():
+            if ty == Anacreon:
+                pass
+            else:
+                try:
+                    get_selector(context, ty)
+                except TypeError as e:
+                    raise TypeError(
+                        f"function {dash_func.func.__qualname__!r} cannot be a dashboard function because it takes a parameter named {name!r} of type {ty!r}"
+                    ) from e
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -181,8 +205,8 @@ async def hide_task_modal() -> HTMLResponse:
 async def get_action_params(
     func_idx: int, request: Request, context: Anacreon = Depends(anacreon_context)
 ) -> HTMLResponse:
-    func = dashboard_functions[func_idx].func
-    type_hints = typing.get_type_hints(func)
+    dashboard_function = dashboard_functions[func_idx]
+    type_hints = typing.get_type_hints(dashboard_function.func)
     if "return" in type_hints:
         del type_hints["return"]
 
@@ -203,7 +227,7 @@ async def get_action_params(
         "action_form.html",
         {
             "request": request,
-            "title": func.__name__,
+            "title": dashboard_function.name,
             "params": params,
             "func_idx": func_idx,
         },
