@@ -75,8 +75,8 @@ class PlanetPair:
 
 async def balance_trade_routes(
     context: Anacreon,
-    filter: WorldFilter = lambda w: True,
-    dry_run: bool = False,
+    # filter: WorldFilter = lambda w: True,
+    # dry_run: bool = False,
 ) -> None:
     logger = logging.getLogger("trade route balancer")
 
@@ -88,7 +88,7 @@ async def balance_trade_routes(
     our_worlds: Dict[int, OwnedWorld] = {
         world.id: world
         for world in context.space_objects.values()
-        if isinstance(world, OwnedWorld) and filter(world)
+        if isinstance(world, OwnedWorld)
     }
 
     assert len(our_worlds) > 0
@@ -112,7 +112,7 @@ async def balance_trade_routes(
 
     for resource_id in resource_ids:
         await balance_routes_for_one_resource(
-            context, our_worlds, resource_id, dry_run=dry_run
+            context, our_worlds, resource_id, dry_run=False
         )
 
 @dataclass

@@ -4,15 +4,16 @@ from anacreonlib.anacreon import Anacreon
 import logging
 from anacreonlib.types.response_datatypes import Fleet, OwnedWorld, World
 from scripts.tasks import fleet_manipulation_utils
+from shared import param_types
 
 # TODO: make rally be able to draw from fleets as well
 
 
 async def rally_ships_to_world_id(
     context: Anacreon,
-    ship_resource_id: int,
+    ship_resource_id: param_types.CommodityId,
     ship_qty: Optional[int],
-    destination_world_id: int,
+    destination_world_id: param_types.AnyWorldId,
 ) -> List[int]:
     """Rally ships to a particular world ID
 
@@ -81,7 +82,9 @@ async def rally_ships_to_world_id(
     # done!
 
 
-async def merge_fleets_in_transit(context: Anacreon, fleet_ids: List[int]) -> None:
+async def merge_fleets_in_transit(
+    context: Anacreon, fleet_ids: List[param_types.OurFleetId]
+) -> None:
     logger = logging.getLogger("merge fleets in transit")
     fleet_waiting_tasks = [
         asyncio.create_task(fleet_manipulation_utils.wait_for_fleet(context, fleet_id))
@@ -91,9 +94,7 @@ async def merge_fleets_in_transit(context: Anacreon, fleet_ids: List[int]) -> No
 
     master_fleet, *fleets_to_merge = fleet_ids
 
-    logger.info(
-        f"fleets arrived, merging fleets into fleet id {master_fleet}"
-    )
+    logger.info(f"fleets arrived, merging fleets into fleet id {master_fleet}")
 
     for fleet in fleets_to_merge:
         fleet_resources = context.space_objects[fleet].resources

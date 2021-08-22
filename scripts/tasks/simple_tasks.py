@@ -23,6 +23,7 @@ from anacreonlib.types.type_hints import Location
 from anacreonlib.types.scenario_info_datatypes import Category, Role, ScenarioInfo
 import anacreonlib.exceptions
 from rx.operators import first
+from shared import param_types
 from shared.param_types import AnyWorldId, CommodityId, OurWorldId
 from scripts.utils import flat_list_to_tuples, dist, dict_to_flat_list, world_has_trait
 
@@ -44,15 +45,13 @@ def _exploration_outline_to_points(outline: List[List[float]]) -> List[Location]
     return flat_list_to_tuples(flattened)
 
 
-async def explore_unexplored_regions(context: Anacreon, fleet_name: str) -> None:
-    def find_fleet(objects: Iterable[AnacreonObject]) -> Fleet:
-        return next(
-            obj
-            for obj in objects
-            if isinstance(obj, Fleet) and obj.name.strip() == fleet_name
-        )
+async def explore_unexplored_regions(context: Anacreon, fleet_id: param_types.OurFleetId) -> None:
+    def fleet() -> Fleet:
+        ret = context.space_objects[fleet_id]
+        assert isinstance(ret, Fleet)
+        return ret
 
-    logger = logging.getLogger(fleet_name)
+    logger = logging.getLogger(fleet().name)
 
     banned_world_ids = set()
     ban_candidate = None
@@ -65,7 +64,7 @@ async def explore_unexplored_regions(context: Anacreon, fleet_name: str) -> None
             if isinstance(obj, OwnSovereign) and obj.id == context.sov_id
         )
 
-        current_fleet: Fleet = find_fleet(context.space_objects.values())
+        current_fleet: Fleet = fleet()
         current_fleet_pos = current_fleet.pos
         logger.info(f"Fleet currently at {current_fleet_pos}")
 
@@ -198,8 +197,8 @@ async def dump_scn_to_json(
 
 async def send_fleet_to_worlds_meeting_predicate(
     context: Anacreon,
-    source_obj_id: int,
-    resources: Dict[int, int],
+    source_obj_id: param_types.OurWorldId,
+    resources: Dict[param_types.CommodityId, int],
     predicate: Callable[[World], bool],
     *,
     logger: Optional[logging.Logger] = None,

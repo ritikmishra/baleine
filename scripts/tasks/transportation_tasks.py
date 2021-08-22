@@ -17,6 +17,8 @@ from scripts.tasks.fleet_manipulation_utils_v2 import fleet_walk as fleet_walk_v
 
 from anacreonlib import Anacreon
 
+from shared import param_types
+
 
 class HasNameAndId(Protocol):
     name: str
@@ -25,9 +27,9 @@ class HasNameAndId(Protocol):
 
 async def sell_stockpile_of_resource(
     context: Anacreon,
-    transport_fleet_name_or_id: NameOrId,
-    resource_name_or_unid: NameOrId,
-    worlds_with_stockpile_name_or_id: Set[NameOrId],
+    transport_fleet_id: param_types.OurFleetId,
+    resource_id: param_types.CommodityId,
+    worlds_with_stockpile_ids: List[param_types.CommodityId],
     *,
     threshold: int = 10000,
 ):
@@ -78,22 +80,11 @@ async def sell_stockpile_of_resource(
                 if matches(obj, name_id_set)
             ]
 
-    transport_fleet_id: int = next(
-        fleet.id
-        for fleet in context.space_objects.values()
-        if isinstance(fleet, Fleet)
-        and transport_fleet_name_or_id in {fleet.name, fleet.id}
-    )
+    worlds_with_stockpile: List[World] = [
+        context.space_objects[w_id] for w_id in worlds_with_stockpile_ids
+    ]
 
-    worlds_with_stockpile: List[World] = name_or_id_set_to_id_list(
-        worlds_with_stockpile_name_or_id
-    )
-
-    resource_elem: ScenarioInfoElement = next(
-        el
-        for el in context.game_info.scenario_info
-        if resource_name_or_unid in {el.unid, el.id}
-    )
+    resource_elem: ScenarioInfoElement = context.scenario_info_objects[resource_id]
     assert resource_elem.id is not None
 
     assert resource_elem.is_cargo and resource_elem.mass
@@ -156,7 +147,7 @@ async def sell_stockpile_of_resource(
             qty_on_world = world_after_arrival.resource_dict.get(resource_elem.id, 0)
 
             if qty_on_world < threshold:
-                # When `attack_fleet_walk_v2` calls us, this exception will bubble up and 
+                # When `attack_fleet_walk_v2` calls us, this exception will bubble up and
                 raise Done()
 
             if qty_on_world > max_transportable_qty:
@@ -211,16 +202,16 @@ async def sell_stockpile_of_resource(
 
 async def rally_ground_forces_to_planet(
     context: Anacreon,
-    transport_fleet_id: int,
-    destination_planet_id: int,
+    transport_fleet_id: param_types.OurFleetId,
+    destination_planet_id: param_types.OurWorldId,
     *,
     threshold_pct: float = 0.1,
 ) -> None:
     logger = logging.getLogger("rally ground forces to planet")
     # sorted by resource quantity descending
-    get_resource_qty: Callable[[OwnedWorld], float] = lambda owned_world: context.calculate_forces(
-        owned_world
-    ).ground_forces
+    get_resource_qty: Callable[
+        [OwnedWorld], float
+    ] = lambda owned_world: context.calculate_forces(owned_world).ground_forces
 
     ground_force_resources: Mapping[int, ScenarioInfoElement] = {
         scn_id: context.scenario_info_objects[scn_id]

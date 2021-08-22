@@ -20,7 +20,7 @@ from anacreonlib.types.response_datatypes import World, Trait, OwnedWorld, Trade
 from anacreonlib.types.scenario_info_datatypes import Category, ScenarioInfoElement
 from anacreonlib.types.type_hints import TechLevel, Location
 from rx.operators import first
-
+from shared import param_types
 from scripts import utils
 from scripts.utils import TermColors
 
@@ -210,7 +210,7 @@ async def designate_low_tl_worlds(context: Anacreon) -> None:
 
 
 async def build_cluster(
-    context: Anacreon, center_world_id: int, radius: float = 200
+    context: Anacreon, center_world_id: param_types.OurWorldId, radius: float = 200
 ) -> None:
     logger = logging.getLogger("cluster builder")
 
@@ -245,14 +245,14 @@ async def build_cluster(
 
 
 async def connect_worlds_to_fnd(
-    context: Anacreon, fnd_id: int, worlds: Optional[List[World]] = None
+    context: Anacreon, fnd_id: param_types.OurWorldId, world_ids: Optional[List[param_types.OurWorldId]] = None
 ) -> None:
     logger = logging.getLogger(f"connect foundation id {fnd_id}")
 
     fnd_world = context.space_objects[fnd_id]
     assert isinstance(fnd_world, OwnedWorld)
 
-    if worlds is None:
+    if world_ids is None:
         worlds = [
             world
             for world in context.space_objects.values()
@@ -262,6 +262,8 @@ async def connect_worlds_to_fnd(
             and world.tech_level <= 7
             and fnd_id not in (world.trade_route_partners or {})
         ]
+    else:
+        worlds = [context.space_objects[w_id] for w_id in world_ids]
 
     if len(worlds) == 0:
         logger.info("Cannot connect new worlds to foundation")

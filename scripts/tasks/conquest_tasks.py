@@ -4,24 +4,22 @@ import abc
 import asyncio
 import dataclasses
 import logging
-from asyncio import Future
-from itertools import chain
-from scripts.tasks.simple_tasks import send_scouts_to_worlds
-from typing import Any, Iterable, List, Set, Union, Optional, cast
+from typing import Any, List, Set, Optional, cast
 
-from anacreonlib.anacreon import Anacreon, MilitaryForceInfo
+from anacreonlib.anacreon import Anacreon
 from anacreonlib.types.response_datatypes import OwnedWorld, World, Fleet
 from anacreonlib.types.type_hints import BattleObjective
 import anacreonlib.utils
 
 from scripts import utils
-from scripts.tasks import NameOrId
 from scripts.tasks.fleet_manipulation_utils import OrderedPlanetId
 from scripts.utils import TermColors
 
 from scripts.tasks.fleet_manipulation_utils_v2 import (
     attack_fleet_walk as attack_fleet_walk_v2,
 )
+
+from shared import param_types
 
 
 @dataclasses.dataclass
@@ -229,20 +227,15 @@ class NailFleetBucket(FleetBucket):
 
 async def conquer_independents_around_id(
     context: Anacreon,
-    center_planet: Set[NameOrId],
+    center_world_ids: List[param_types.AnyWorldId],
     *,
     radius=250,
-    generic_hammer_fleets: Set[NameOrId],
-    nail_fleets: Set[NameOrId],
-    anti_missile_hammer_fleets: Optional[Set[NameOrId]] = None,
+    generic_hammer_fleets: List[param_types.OurFleetId],
+    nail_fleets: List[param_types.OurFleetId],
+    anti_missile_hammer_fleets: Optional[List[param_types.OurFleetId]] = None,
 ) -> None:
-    capitals = [
-        world
-        for world in context.space_objects.values()
-        if isinstance(world, World)
-        and world.efficiency > 20
-        and (world.name in center_planet or world.id in center_planet)
-    ]
+    center_worlds = [context.space_objects[w_id] for w_id in center_world_ids]
+    assert all(isinstance(w, World) for w in center_worlds)
     possible_victims = [
         world
         for world in context.space_objects.values()
@@ -250,13 +243,14 @@ async def conquer_independents_around_id(
         and world.sovereign_id == 1
         and world.resources is not None
         and any(
-            0.0 < utils.dist(world.pos, capital.pos) <= radius for capital in capitals
+            0.0 < utils.dist(world.pos, capital.pos) <= radius
+            for capital in center_worlds
         )
     ]
 
     await conquer_planets(
         context,
-        possible_victims,
+        [param_types.AnyWorldId(w.id) for w in possible_victims],
         generic_hammer_fleets=generic_hammer_fleets,
         nail_fleets=nail_fleets,
         anti_missile_hammer_fleets=anti_missile_hammer_fleets,
@@ -265,66 +259,44 @@ async def conquer_independents_around_id(
 
 async def conquer_planets(
     context: Anacreon,
-    planets: Union[List[World], Set[NameOrId]],
+    planet_ids: List[param_types.AnyWorldId],
     *,
-    generic_hammer_fleets: Set[NameOrId],
-    nail_fleets: Set[NameOrId],
-    anti_missile_hammer_fleets: Optional[Set[NameOrId]] = None,
+    generic_hammer_fleets: List[param_types.OurFleetId],
+    nail_fleets: List[param_types.OurFleetId],
+    anti_missile_hammer_fleets: Optional[List[param_types.OurFleetId]] = None,
 ) -> None:
-    def resolve_fleet_list(name_id_set: Set[NameOrId]) -> Set[int]:
-        """Given a set of names or ids, create a set of IDs only"""
-        if all(isinstance(fleet, int) for fleet in name_id_set):
-            return cast(Set[int], name_id_set)
-        else:
-            ret: Set[int] = set()
-            for name_or_id in name_id_set:
-                if isinstance(name_or_id, int):
-                    assert isinstance(
-                        context.space_objects.get(name_or_id, None), Fleet
-                    )
-                    ret.add(name_or_id)
-                else:
-                    try:
-                        # Find an object with the name
-                        ret.add(
-                            next(
-                                obj.id
-                                for obj in context.space_objects.values()
-                                if isinstance(obj, Fleet)
-                                and obj.sovereign_id == context.sov_id
-                                and obj.name == name_or_id
-                            )
-                        )
-                    except StopIteration as e:
-                        raise ValueError(
-                            f"Could not fleet with name {name_or_id!r}"
-                        ) from e
-            return ret
-
-    nail_bucket = NailFleetBucket(
-        context=context, fleet_identifiers=resolve_fleet_list(nail_fleets)
-    )
+    nail_bucket = NailFleetBucket(context=context, fleet_identifiers=set(nail_fleets))
     hammer_bucket = HammerFleetBucket(
         context=context,
-        fleet_identifiers=resolve_fleet_list(generic_hammer_fleets),
+        fleet_identifiers=set(generic_hammer_fleets),
         output_bucket=nail_bucket,
     )
     anti_missile_hammer_bucket = AntiMissileHammerFleetBucket(
         context=context,
-        fleet_identifiers=resolve_fleet_list(anti_missile_hammer_fleets or set()),
+        fleet_identifiers=(
+            set(anti_missile_hammer_fleets)
+            if anti_missile_hammer_fleets is not None
+            else set()
+        ),
         output_bucket=nail_bucket,
     )
 
-    await conquer_planets_using_buckets(
+    worlds = []
+    for w_id in planet_ids:
+        world = context.space_objects[w_id]
+        assert isinstance(world, World)
+        worlds.append(world)
+
+    await _conquer_planets_using_buckets(
         context,
-        planets,
+        worlds,
         fleet_buckets=[nail_bucket, anti_missile_hammer_bucket, hammer_bucket],
     )
 
 
-async def conquer_planets_using_buckets(
+async def _conquer_planets_using_buckets(
     context: Anacreon,
-    planets: Union[List[World], Set[NameOrId]],
+    planets: List[World],
     *,
     fleet_buckets: List[FleetBucket],
 ) -> None:
@@ -338,19 +310,6 @@ async def conquer_planets_using_buckets(
     """
     logger = logging.getLogger("Conquer planets")
 
-    # Step 0: ensure that we are working with are all planet objects
-    planets_we_could_attack: List[World]
-    if all(isinstance(obj, World) for obj in planets):
-        planets_we_could_attack = list(cast(Iterable[World], planets))
-
-    else:
-        planets_we_could_attack = [
-            world
-            for world in context.space_objects.values()
-            if isinstance(world, World)
-            and (world.name in planets or world.id in planets)
-        ]
-
     # Step 1: ensure that we have ids for all the fleets
     logger.info("we are going to conquer the following planets")
     fstr = (
@@ -362,7 +321,7 @@ async def conquer_planets_using_buckets(
     logger.info(fstr.format("name", "gf", "sf", "missilef", "mode", "id"))
 
     # Step 2: Sort them into queues.
-    for world in planets_we_could_attack:
+    for world in planets:
         if world.resources is not None:
             force = context.calculate_forces(world.resources)
             for bucket in fleet_buckets:
@@ -441,6 +400,9 @@ async def find_nearby_independent_worlds(context: Anacreon) -> List[World]:
         world
         for world in context.space_objects.values()
         if isinstance(world, World)
-        and world.sovereign_id == 1 # Is a sovereign world
-        and any(utils.dist(world.pos, jump_beacon_pos) <= 250 for jump_beacon_pos in jump_beacon_location) # Is in distance
+        and world.sovereign_id == 1  # Is a sovereign world
+        and any(
+            utils.dist(world.pos, jump_beacon_pos) <= 250
+            for jump_beacon_pos in jump_beacon_location
+        )  # Is in distance
     ]
