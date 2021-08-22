@@ -239,7 +239,7 @@ AnyWorldSelector: Callable[
     {
         w.id: NameAndValue(w.name, AnyWorldId(w.id))
         for w in context.space_objects.values()
-        if isinstance(w, OwnedWorld)
+        if isinstance(w, World)
     },
 )
 
